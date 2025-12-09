@@ -1,0 +1,52 @@
+{
+  "name": "@chaosity/location-client",
+  "version": "0.1.1",
+  "description": "Client library for Chaosity Location Service with AWS Location Service compatibility",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "jest",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "aws",
+    "location",
+    "maps",
+    "geocoding",
+    "maplibre",
+    "places"
+  ],
+  "author": "Chaosity",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/chaosity-io/location-service-workspace.git",
+    "directory": "location-service-client"
+  },
+  "homepage": "https://github.com/chaosity-io/location-service-workspace/tree/main/location-service-client",
+  "bugs": {
+    "url": "https://github.com/chaosity-io/location-service-workspace/issues"
+  },
+  "dependencies": {
+    "@aws-sdk/client-geo-places": "^3.0.0",
+    "@aws/amazon-location-utilities-datatypes": "^1.0.0"
+  },
+  "peerDependencies": {
+    "maplibre-gl": "^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "maplibre-gl": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ]
+}
