@@ -7,6 +7,9 @@ import {
   SearchTextCommand,
   SuggestCommand,
 } from '@aws-sdk/client-geo-places'
+import debug from 'debug'
+
+const log = debug('location-client:api')
 
 
 
@@ -27,8 +30,12 @@ export class GeoPlacesClient {
 
   async send<TInput, TOutput>(command: TInput): Promise<TOutput> {
     const endpoint = this.getEndpoint(command)
+    const url = `${this.clientConfig.apiUrl}${endpoint}`
 
-    const response = await fetch(`${this.clientConfig.apiUrl}${endpoint}`, {
+    log('Sending %s request to %s', (command as any).constructor.name, endpoint)
+    const startTime = Date.now()
+
+    const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -37,10 +44,14 @@ export class GeoPlacesClient {
       body: JSON.stringify(command)
     })
 
+    const duration = Date.now() - startTime
+
     if (!response.ok) {
+      log('Request failed: %s %s (%dms)', response.status, response.statusText, duration)
       throw new Error(`API request failed: ${response.statusText}`)
     }
 
+    log('Request successful: %s (%dms)', response.status, duration)
     return response.json()
   }
 

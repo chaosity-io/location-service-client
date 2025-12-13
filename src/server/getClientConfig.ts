@@ -15,7 +15,7 @@ export type ServerAuthConfig = TokenProviderConfig
  * NEVER call from browser/client code as it exposes credentials.
  * For SPA projects, create your own backend endpoint that calls this.
  */
-export async function getClientConfig(config: ServerAuthConfig): Promise<ClientConfig> {
+export async function getClientConfig(config: ServerAuthConfig): Promise<ClientConfig & { expiresAt?: number }> {
   const provider = new TokenProvider(config)
   const result = await provider.getToken()
 
@@ -26,5 +26,6 @@ export async function getClientConfig(config: ServerAuthConfig): Promise<ClientC
   return {
     apiUrl: config.apiUrl,
     token: result.token,
+    expiresAt: result.expiresAt,
   }
 }

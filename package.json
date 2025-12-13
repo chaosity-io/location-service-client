@@ -30,7 +30,9 @@
   },
   "dependencies": {
     "@aws-sdk/client-geo-places": "^3.0.0",
-    "@aws/amazon-location-utilities-datatypes": "^1.0.0"
+    "@aws/amazon-location-utilities-datatypes": "^1.0.0",
+    "client-oauth2": "^4.3.3",
+    "debug": "^4.4.3"
   },
   "peerDependencies": {
     "maplibre-gl": "^4.0.0"
@@ -41,6 +43,7 @@
     }
   },
   "devDependencies": {
+    "@types/debug": "^4.1.12",
     "typescript": "^5.0.0"
   },
   "files": [

@@ -2,6 +2,20 @@
 
 AWS Location Service compatible client with custom Bearer token authentication.
 
+## ⚠️ Security Warning
+
+**This package contains server-side authentication utilities that require client credentials.**
+
+- `TokenProvider` and `getClientConfig()` are **SERVER-SIDE ONLY**
+- They require `clientId` and `clientSecret` which must **NEVER** be exposed to browsers
+- Only use these in:
+  - Node.js servers
+  - Next.js Server Actions (`'use server'`)
+  - Next.js API routes
+  - Backend services
+
+**For React applications**, use [`@chaosity/location-client-react`](https://www.npmjs.com/package/@chaosity/location-client-react) which handles authentication safely.
+
 ## Installation
 
 ```bash
@@ -146,6 +160,33 @@ import {
   routeToFeatureCollection,
   devicePositionsToFeatureCollection
 } from '@chaosity/location-client'
+```
+
+## Logging
+
+The library uses the `debug` package for optional verbose logging. Enable it via the `DEBUG` environment variable:
+
+```bash
+# Enable all location-client logs
+DEBUG=location-client:* npm run dev
+
+# Enable only authentication logs
+DEBUG=location-client:auth npm run dev
+
+# Enable only API request logs
+DEBUG=location-client:api npm run dev
+
+# Enable multiple namespaces
+DEBUG=location-client:*,express:* npm run dev
+```
+
+Example output:
+```
+location-client:auth Initializing TokenProvider for https://api.example.com +0ms
+location-client:auth Fetching new token from https://api.example.com +2ms
+location-client:auth Token acquired successfully (expires in 3600s) +145ms
+location-client:api Sending SuggestCommand request to /address/suggestion +0ms
+location-client:api Request successful: 200 (89ms) +89ms
 ```
 
 ## Security Best Practices
