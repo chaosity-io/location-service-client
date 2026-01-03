@@ -22,3 +22,6 @@ export type { ClientConfig } from './types'
 // Server-only utilities
 export { getClientConfig } from './server/getClientConfig'
 export type { ServerAuthConfig } from './server/getClientConfig'
+export { LocationServiceConnector } from './server/LocationServiceConnector'
+export type { ConnectorConfig } from './server/LocationServiceConnector'
+export { transformRequest } from './maps/Utils'

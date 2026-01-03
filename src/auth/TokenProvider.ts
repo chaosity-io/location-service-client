@@ -1,4 +1,5 @@
 import ClientOAuth2 from 'client-oauth2'
+import { decodeJwt } from 'jose'
 import debug from 'debug'
 
 const log = debug('location-client:auth')
@@ -6,8 +7,6 @@ const log = debug('location-client:auth')
 export interface TokenResponse {
   success: boolean
   token?: string
-  expiresIn?: number
-  expiresAt?: number
   error?: string
 }
 
@@ -48,8 +47,8 @@ export interface TokenProviderConfig {
 export class TokenProvider {
   private config: TokenProviderConfig
   private cachedToken?: string
-  private expiresAt?: number
   private oauth2Client: ClientOAuth2
+  private tokenPromise?: Promise<TokenResponse>
 
   constructor(config: TokenProviderConfig) {
     // Runtime check: prevent usage in browser
@@ -71,32 +70,46 @@ export class TokenProvider {
   }
 
   async getToken(forceRefresh = false): Promise<TokenResponse> {
-    if (!forceRefresh && this.cachedToken && this.expiresAt && !this.isExpired()) {
-      log('Using cached token (expires in %ds)', Math.floor((this.expiresAt - Date.now()) / 1000))
+    if (!forceRefresh && this.cachedToken && !this.isExpired()) {
+      const exp = this.getTokenExpiry()
+      log('Using cached token (expires in %ds)', exp ? Math.floor(exp - Date.now() / 1000) : 'unknown')
       return {
         success: true,
-        token: this.cachedToken,
-        expiresAt: this.expiresAt
+        token: this.cachedToken
       }
     }
 
+    // If token fetch is already in progress, wait for it
+    if (this.tokenPromise) {
+      log('Token fetch in progress, waiting for existing request...')
+      return this.tokenPromise
+    }
+
+    // Start new token fetch
     const reason = forceRefresh ? 'forced refresh' : (this.cachedToken ? 'token expired' : 'no cached token')
     log('Refreshing token (%s) from %s', reason, this.config.apiUrl)
+    
+    this.tokenPromise = this.fetchToken()
+    
+    try {
+      const result = await this.tokenPromise
+      return result
+    } finally {
+      // Clear promise after completion (success or failure)
+      this.tokenPromise = undefined
+    }
+  }
+
+  private async fetchToken(): Promise<TokenResponse> {
     try {
       const token = await this.oauth2Client.credentials.getToken()
-      const expiresIn = typeof token.data?.expires_in === 'number' 
-        ? token.data.expires_in 
-        : parseInt(token.data?.expires_in || '3600')
-      
       this.cachedToken = token.accessToken
-      this.expiresAt = Date.now() + (expiresIn * 1000)
 
-      log('Token acquired successfully (expires in %ds)', expiresIn)
+      const exp = this.getTokenExpiry()
+      log('Token acquired successfully (expires in %ds)', exp ? Math.floor(exp - Date.now() / 1000) : 'unknown')
       return {
         success: true,
-        token: this.cachedToken,
-        expiresIn,
-        expiresAt: this.expiresAt,
+        token: this.cachedToken
       }
     } catch (error) {
       log('Token acquisition failed: %s', error instanceof Error ? error.message : 'Unknown error')
@@ -107,13 +120,23 @@ export class TokenProvider {
     }
   }
 
+  private getTokenExpiry(): number | null {
+    if (!this.cachedToken) return null
+    try {
+      const decoded = decodeJwt(this.cachedToken)
+      return decoded.exp || null
+    } catch {
+      return null
+    }
+  }
+
   private isExpired(bufferSeconds = 60): boolean {
-    if (!this.expiresAt) return true
-    return Date.now() >= (this.expiresAt - bufferSeconds * 1000)
+    const exp = this.getTokenExpiry()
+    if (!exp) return true
+    return Date.now() / 1000 >= (exp - bufferSeconds)
   }
 
   clearCache(): void {
     this.cachedToken = undefined
-    this.expiresAt = undefined
   }
 }
