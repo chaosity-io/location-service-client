@@ -42,7 +42,7 @@
   "dependencies": {
     "@aws-sdk/client-geo-places": "^3.0.0",
     "@aws/amazon-location-utilities-datatypes": "^1.0.0",
-    "@maplibre/maplibre-gl-geocoder": "file:../maplibre-gl-geocoder",
+    "@maplibre/maplibre-gl-geocoder": "^1.9.4",
     "client-oauth2": "^4.3.3",
     "debug": "^4.4.3",
     "jose": "^5.0.0"

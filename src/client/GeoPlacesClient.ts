@@ -2,6 +2,8 @@ import debug from 'debug'
 import { ClientConfig } from '../types'
 
 const log = debug('location-client:api')
+const logError = debug('location-client:api:error')
+
 
 
 
@@ -26,8 +28,8 @@ export class GeoPlacesClient {
     const commandName = (command as any).constructor.name
     const input = (command as any).input
 
-    console.log(`[GeoPlacesClient] Sending ${commandName} to ${endpoint}`)
-    console.log('[GeoPlacesClient] Request body:', JSON.stringify(input, null, 2))
+    log(`[GeoPlacesClient] Sending ${commandName} to ${endpoint}`)
+    log('[GeoPlacesClient] Request body:', JSON.stringify(input, null, 2))
 
     log('Sending %s request to %s', commandName, endpoint)
     const startTime = Date.now()
@@ -45,8 +47,8 @@ export class GeoPlacesClient {
 
     if (!response.ok) {
       const errorText = await response.text()
-      console.error(`[GeoPlacesClient] Request failed: ${response.status} ${response.statusText}`, errorText)
-      log('Request failed: %s %s (%dms)', response.status, response.statusText, duration)
+      log(`[GeoPlacesClient] Request failed: ${response.status} ${response.statusText}`, errorText)
+      logError('Request failed: %s %s (%dms)', response.status, response.statusText, duration)
 
       // Try to parse error message from response
       let errorMessage = `API request failed: ${response.statusText}`
@@ -64,7 +66,7 @@ export class GeoPlacesClient {
     }
 
     const result = await response.json()
-    console.log(`[GeoPlacesClient] Response (${duration}ms):`, JSON.stringify(result, null, 2))
+    log(`[GeoPlacesClient] Response (${duration}ms):`, JSON.stringify(result, null, 2))
     log('Request successful: %s (%dms)', response.status, duration)
     return result
   }
