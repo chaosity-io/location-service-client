@@ -16,9 +16,15 @@ export * from '@aws/amazon-location-utilities-datatypes'
 // Adapters (Custom - for MapLibre integration)
 export { GeoPlaces } from './adapters/GeoPlaces'
 
+// Maps utilities
+export { createTransformRequest } from './maps/createTransformRequest'
+export { transformRequest } from './maps/Utils'
+
 // Custom Types
 export type { ClientConfig } from './types'
 
 // Server-only utilities
 export { getClientConfig } from './server/getClientConfig'
 export type { ServerAuthConfig } from './server/getClientConfig'
+export { LocationServiceConnector } from './server/LocationServiceConnector'
+export type { ConnectorConfig } from './server/LocationServiceConnector'
