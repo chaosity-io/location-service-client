@@ -9,8 +9,28 @@ export interface ServerAuthConfig {
 
 const log = debug('location-client:clientConfig')
 
+// Singleton instance to prevent race conditions
+let tokenProviderInstance: TokenProvider | null = null
+let currentConfig: string | null = null
+
+function getTokenProvider(apiUrl: string, clientId: string, clientSecret: string): TokenProvider {
+  const configKey = `${apiUrl}:${clientId}`
+  
+  // Reuse existing instance if config matches
+  if (tokenProviderInstance && currentConfig === configKey) {
+    log('[getTokenProvider] Reusing existing TokenProvider instance')
+    return tokenProviderInstance
+  }
+  
+  // Create new instance if config changed
+  log('[getTokenProvider] Creating new TokenProvider instance')
+  tokenProviderInstance = new TokenProvider({ apiUrl, clientId, clientSecret })
+  currentConfig = configKey
+  return tokenProviderInstance
+}
+
 export interface ServerClientConfig extends ClientConfig {
-  // No getToken - use LocationServiceConnector for server-side token management
+  expiresAt?: number
 }
 
 /**
@@ -70,8 +90,8 @@ export async function getClientConfig(config: ServerAuthConfig = {}): Promise<Se
     )
   }
 
-  log('[getClientConfig] Creating TokenProvider')
-  const provider = new TokenProvider({ apiUrl, clientId, clientSecret })
+  log('[getClientConfig] Getting TokenProvider instance')
+  const provider = getTokenProvider(apiUrl, clientId, clientSecret)
 
   log('[getClientConfig] Fetching token')
   const result = await provider.getToken()
@@ -84,6 +104,7 @@ export async function getClientConfig(config: ServerAuthConfig = {}): Promise<Se
   log('[getClientConfig] Token fetched successfully, length:', result.token.length)
   return {
     apiUrl,
-    token: result.token
+    token: result.token,
+    expiresAt: result.expiresAt
   }
 }

@@ -1,5 +1,4 @@
 import ClientOAuth2 from 'client-oauth2'
-import { decodeJwt } from 'jose'
 import debug from 'debug'
 
 const log = debug('location-client:auth')
@@ -7,6 +6,7 @@ const log = debug('location-client:auth')
 export interface TokenResponse {
   success: boolean
   token?: string
+  expiresAt?: number
   error?: string
 }
 
@@ -47,6 +47,7 @@ export interface TokenProviderConfig {
 export class TokenProvider {
   private config: TokenProviderConfig
   private cachedToken?: string
+  private cachedExpiresAt?: number
   private oauth2Client: ClientOAuth2
   private tokenPromise?: Promise<TokenResponse>
 
@@ -71,11 +72,12 @@ export class TokenProvider {
 
   async getToken(forceRefresh = false): Promise<TokenResponse> {
     if (!forceRefresh && this.cachedToken && !this.isExpired()) {
-      const exp = this.getTokenExpiry()
-      log('Using cached token (expires in %ds)', exp ? Math.floor(exp - Date.now() / 1000) : 'unknown')
+      const expiresIn = this.cachedExpiresAt ? Math.floor((this.cachedExpiresAt - Date.now()) / 1000) : 'unknown'
+      log('Using cached token (expires in %ds)', expiresIn)
       return {
         success: true,
-        token: this.cachedToken
+        token: this.cachedToken,
+        expiresAt: this.cachedExpiresAt
       }
     }
 
@@ -105,11 +107,15 @@ export class TokenProvider {
       const token = await this.oauth2Client.credentials.getToken()
       this.cachedToken = token.accessToken
 
-      const exp = this.getTokenExpiry()
-      log('Token acquired successfully (expires in %ds)', exp ? Math.floor(exp - Date.now() / 1000) : 'unknown')
+      // Use expires_in from OAuth2 response (standard)
+      const expiresIn = token.data?.expires_in || 900 // Default 15 minutes
+      this.cachedExpiresAt = Date.now() + (expiresIn * 1000)
+
+      log('Token acquired successfully (expires in %ds)', expiresIn)
       return {
         success: true,
-        token: this.cachedToken
+        token: this.cachedToken,
+        expiresAt: this.cachedExpiresAt
       }
     } catch (error) {
       log('Token acquisition failed: %s', error instanceof Error ? error.message : 'Unknown error')
@@ -120,23 +126,13 @@ export class TokenProvider {
     }
   }
 
-  private getTokenExpiry(): number | null {
-    if (!this.cachedToken) return null
-    try {
-      const decoded = decodeJwt(this.cachedToken)
-      return decoded.exp || null
-    } catch {
-      return null
-    }
-  }
-
   private isExpired(bufferSeconds = 60): boolean {
-    const exp = this.getTokenExpiry()
-    if (!exp) return true
-    return Date.now() / 1000 >= (exp - bufferSeconds)
+    if (!this.cachedExpiresAt) return true
+    return Date.now() >= (this.cachedExpiresAt - bufferSeconds * 1000)
   }
 
   clearCache(): void {
     this.cachedToken = undefined
+    this.cachedExpiresAt = undefined
   }
 }

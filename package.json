@@ -44,8 +44,7 @@
     "@aws/amazon-location-utilities-datatypes": "^1.0.0",
     "@maplibre/maplibre-gl-geocoder": "^1.9.4",
     "client-oauth2": "^4.3.3",
-    "debug": "^4.4.3",
-    "jose": "^5.0.0"
+    "debug": "^4.4.3"
   },
   "peerDependencies": {
     "maplibre-gl": "^5.0.0"
