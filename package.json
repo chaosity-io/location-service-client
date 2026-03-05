@@ -18,7 +18,8 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "test": "jest",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
@@ -58,7 +59,11 @@
     "@types/debug": "^4.1.12",
     "@types/node": "^25.0.3",
     "maplibre-gl": "^5.0.0",
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "vitest": "^3.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "files": [
     "dist",
