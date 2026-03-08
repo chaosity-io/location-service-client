@@ -2,11 +2,11 @@
 
 AWS Location Service compatible client with custom Bearer token authentication.
 
-## ⚠️ Security Warning
+## Security Warning
 
 **This package contains server-side authentication utilities that require client credentials.**
 
-- `TokenProvider` and `getClientConfig()` are **SERVER-SIDE ONLY**
+- `TokenProvider` and `getClientConfig()` are **SERVER-SIDE ONLY** (import from `@chaosity/location-client/server`)
 - They require `clientId` and `clientSecret` which must **NEVER** be exposed to browsers
 - Only use these in:
   - Node.js servers
@@ -14,7 +14,7 @@ AWS Location Service compatible client with custom Bearer token authentication.
   - Next.js API routes
   - Backend services
 
-**For React applications**, use [`@chaosity/location-client-react`](https://www.npmjs.com/package/@chaosity/location-client-react) which handles authentication safely.
+**For React applications**, use [`@chaosity/location-client-react`](https://www.npmjs.com/package/@chaosity/location-client-react) which handles authentication and token refresh safely.
 
 ## Installation
 
@@ -27,115 +27,152 @@ npm install @chaosity/location-client
 - **Custom Authentication**: Uses Bearer tokens instead of AWS SigV4
 - **AWS SDK Commands**: Full access to all AWS Location Service commands
 - **Data Type Utilities**: Built-in GeoJSON conversion utilities
-- **MapLibre Integration**: Adapter for MapLibre GL Geocoder
+- **MapLibre Integration**: Adapter for MapLibre GL Geocoder and `createTransformRequest` helper
+- **Server Utilities**: `getClientConfig()` with auto-env detection and token caching
 
 ## Quick Start
 
-### Basic Client Usage
+### Server-Side: Get Config with Auto-Authentication
 
-```typescript
-import { GeoPlacesClient, SuggestCommand } from '@chaosity/location-client'
-
-const client = new GeoPlacesClient({
-  apiUrl: 'https://api.example.com',
-  token: 'your-bearer-token'
-})
-
-const command = new SuggestCommand({
-  QueryText: 'Vancouver',
-  MaxResults: 5
-})
-
-const response = await client.send(command)
-```
-
-### Server-Side Authentication (Next.js Server Action)
+The simplest way to authenticate server-side. Reads credentials from environment variables automatically.
 
 ```typescript
 // app/actions/location.ts
 'use server'
 
+import { getClientConfig } from '@chaosity/location-client/server'
+
 export async function getLocationConfig() {
-  const response = await fetch('https://api.example.com/auth/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      client_id: process.env.LOCATION_CLIENT_ID!,
-      client_secret: process.env.LOCATION_CLIENT_SECRET!,
-      grant_type: 'client_credentials'
-    })
-  })
-  
-  const data = await response.json()
-  return {
-    apiUrl: 'https://api.example.com',
-    token: data.access_token
-  }
+  // Auto-reads LOCATION_API_URL, LOCATION_CLIENT_ID, LOCATION_CLIENT_SECRET
+  return await getClientConfig()
 }
 ```
 
-### MapLibre Integration
+Set these environment variables:
+
+```bash
+LOCATION_API_URL=https://api.chaosity.cloud
+LOCATION_CLIENT_ID=your-client-id
+LOCATION_CLIENT_SECRET=your-client-secret
+```
+
+Or pass credentials explicitly:
 
 ```typescript
-import { GeoPlaces } from '@chaosity/location-client'
+const config = await getClientConfig({
+  apiUrl: 'https://api.chaosity.cloud',
+  clientId: process.env.MY_CLIENT_ID!,
+  clientSecret: process.env.MY_SECRET!,
+})
+// config = { apiUrl, token, expiresAt }
+```
+
+### Client-Side: Using the GeoPlacesClient
+
+```typescript
+import { GeoPlacesClient, SuggestCommand } from '@chaosity/location-client'
+
+const client = new GeoPlacesClient({
+  apiUrl: 'https://api.chaosity.cloud',
+  token: 'your-bearer-token',
+})
+
+const response = await client.send(
+  new SuggestCommand({ QueryText: 'Vancouver', MaxResults: 5 })
+)
+```
+
+### MapLibre Map Integration
+
+Use `createTransformRequest` to automatically attach Bearer tokens to map tile requests:
+
+```typescript
+import { createTransformRequest } from '@chaosity/location-client'
+import maplibregl from 'maplibre-gl'
+
+const map = new maplibregl.Map({
+  container: 'map',
+  style: `${apiUrl}/maps/Standard/descriptor`,
+  center: [-123.12, 49.28],
+  zoom: 10,
+  transformRequest: createTransformRequest(apiUrl, getToken),
+})
+```
+
+`createTransformRequest` handles setting the correct `Accept` headers for tiles (protobuf), glyphs, sprites, and style descriptors.
+
+### MapLibre Geocoder Integration
+
+```typescript
+import { GeoPlacesClient, GeoPlaces } from '@chaosity/location-client'
 import MaplibreGeocoder from '@maplibre/maplibre-gl-geocoder'
 import maplibregl from 'maplibre-gl'
 
-const map = new maplibregl.Map({ /* ... */ })
-const geoPlaces = new GeoPlaces(apiUrl, token, map)
+// GeoPlaces adapter takes a GeoPlacesClient instance and the map
+const client = new GeoPlacesClient({ apiUrl, token })
+const geoPlaces = new GeoPlaces(client, map)
 
-// Add geocoder control
 const geocoder = new MaplibreGeocoder(geoPlaces, {
   maplibregl,
   showResultsWhileTyping: true,
-  limit: 30
+  limit: 30,
 })
 
 map.addControl(geocoder, 'top-left')
 
-// Handle result selection
-geocoder.on('result', async (event) => {
-  const { id, result_type } = event.result
-  if (result_type === 'Place') {
-    const details = await geoPlaces.searchByPlaceId(id)
-    console.log('Place details:', details)
-  }
+// The geocoder calls getSuggestions → searchByPlaceId internally.
+// The 'result' event fires with the resolved place feature.
+geocoder.on('result', (event) => {
+  console.log('Selected place:', event.result)
 })
 ```
 
 ## API Reference
 
-### GeoPlacesClient
+### Main Exports (`@chaosity/location-client`)
 
-Main client for executing commands.
+#### GeoPlacesClient
+
+Client for executing AWS Location Service commands with Bearer token auth.
 
 ```typescript
 const client = new GeoPlacesClient({
   apiUrl: string,
-  token: string
+  token: string,
+  getToken?: () => string | undefined, // Optional: dynamic token getter
 })
 
 await client.send(command)
 ```
 
-### GeoPlaces Adapter
+When `getToken` is provided, it is called on every request so token updates are reflected without recreating the client.
 
-MapLibre Geocoder adapter for search and geocoding.
+#### GeoPlaces Adapter
+
+Implements the `MaplibreGeocoderApi` interface for use with `@maplibre/maplibre-gl-geocoder`. Methods are called automatically by the geocoder control.
 
 ```typescript
-const geoPlaces = new GeoPlaces(apiUrl, token, map)
+const client = new GeoPlacesClient({ apiUrl, token })
+const geoPlaces = new GeoPlaces(client, map)
 
-// Forward geocoding (search)
-await geoPlaces.forwardGeocode({ query: 'Vancouver' })
-
-// Reverse geocoding (coordinates to address)
-await geoPlaces.reverseGeocode({ query: [-123.12, 49.28] })
-
-// Get place details by ID
-await geoPlaces.searchByPlaceId('place-id')
+// Pass to MaplibreGeocoder — it calls these methods internally:
+// geoPlaces.getSuggestions(config)    — typeahead suggestions
+// geoPlaces.forwardGeocode(config)    — text to coordinates
+// geoPlaces.reverseGeocode(config)    — coordinates to address
+// geoPlaces.searchByPlaceId(config)   — place ID to details
 ```
 
-### Available Commands
+#### createTransformRequest
+
+Creates a MapLibre `transformRequest` function that adds Bearer auth and correct `Accept` headers.
+
+```typescript
+import { createTransformRequest } from '@chaosity/location-client'
+
+const transformRequest = createTransformRequest(apiUrl, () => currentToken)
+```
+
+#### Available Commands
 
 All AWS Location Service commands from `@aws-sdk/client-geo-places`:
 
@@ -146,11 +183,11 @@ import {
   ReverseGeocodeCommand,
   GetPlaceCommand,
   SearchTextCommand,
-  SearchNearbyCommand
+  SearchNearbyCommand,
 } from '@chaosity/location-client'
 ```
 
-### Data Type Utilities
+#### Data Type Utilities
 
 GeoJSON conversion utilities from `@aws/amazon-location-utilities-datatypes`:
 
@@ -158,13 +195,57 @@ GeoJSON conversion utilities from `@aws/amazon-location-utilities-datatypes`:
 import {
   placeToFeatureCollection,
   routeToFeatureCollection,
-  devicePositionsToFeatureCollection
+  devicePositionsToFeatureCollection,
 } from '@chaosity/location-client'
+```
+
+### Server Exports (`@chaosity/location-client/server`)
+
+#### getClientConfig
+
+Gets a client config with a fresh token. Uses a singleton `TokenProvider` internally — safe to call repeatedly (tokens are cached and refreshed automatically).
+
+```typescript
+import { getClientConfig } from '@chaosity/location-client/server'
+
+const config = await getClientConfig()
+// { apiUrl: string, token: string, expiresAt?: number }
+```
+
+#### TokenProvider
+
+Lower-level token management with caching and deduplication.
+
+```typescript
+import { TokenProvider } from '@chaosity/location-client/server'
+
+const provider = new TokenProvider({
+  apiUrl: process.env.LOCATION_API_URL!,
+  clientId: process.env.LOCATION_CLIENT_ID!,
+  clientSecret: process.env.LOCATION_CLIENT_SECRET!,
+})
+
+const { success, token, expiresAt } = await provider.getToken()
+```
+
+#### LocationServiceConnector
+
+Server-side connector for backend-to-backend API calls. Can auto-configure from environment variables when no config is passed.
+
+```typescript
+import { LocationServiceConnector } from '@chaosity/location-client/server'
+
+const connector = new LocationServiceConnector({
+  apiUrl: config.apiUrl,
+  token: config.token,
+})
+
+const result = await connector.send(new SuggestCommand({ QueryText: 'Vancouver' }))
 ```
 
 ## Logging
 
-The library uses the `debug` package for optional verbose logging. Enable it via the `DEBUG` environment variable:
+The library uses the `debug` package for optional verbose logging:
 
 ```bash
 # Enable all location-client logs
@@ -175,73 +256,6 @@ DEBUG=location-client:auth npm run dev
 
 # Enable only API request logs
 DEBUG=location-client:api npm run dev
-
-# Enable multiple namespaces
-DEBUG=location-client:*,express:* npm run dev
-```
-
-Example output:
-```
-location-client:auth Initializing TokenProvider for https://api.example.com +0ms
-location-client:auth Fetching new token from https://api.example.com +2ms
-location-client:auth Token acquired successfully (expires in 3600s) +145ms
-location-client:api Sending SuggestCommand request to /address/suggestion +0ms
-location-client:api Request successful: 200 (89ms) +89ms
-```
-
-## Security Best Practices
-
-⚠️ **NEVER expose client credentials in browser code!**
-
-- Store `client_id` and `client_secret` in server environment variables
-- Use Server Actions or API routes to fetch tokens
-- Only send the JWT token to the browser
-- Tokens should be short-lived and refreshed as needed
-
-## Example: Complete MapLibre Setup
-
-```typescript
-'use client'
-
-import { GeoPlaces } from '@chaosity/location-client'
-import { getLocationConfig } from '@/lib/actions/location'
-import maplibregl from 'maplibre-gl'
-import MaplibreGeocoder from '@maplibre/maplibre-gl-geocoder'
-
-export default function MapComponent() {
-  useEffect(() => {
-    async function initMap() {
-      // Get config from server
-      const { apiUrl, token } = await getLocationConfig()
-      
-      // Initialize map
-      const map = new maplibregl.Map({
-        container: 'map',
-        style: `${apiUrl}/maps/Standard/descriptor`,
-        center: [-123.12, 49.28],
-        zoom: 10,
-        transformRequest: (url) => {
-          if (url.startsWith(apiUrl)) {
-            return {
-              url,
-              headers: { 'Authorization': `Bearer ${token}` }
-            }
-          }
-          return { url }
-        }
-      })
-      
-      // Add geocoder
-      const geoPlaces = new GeoPlaces(apiUrl, token, map)
-      const geocoder = new MaplibreGeocoder(geoPlaces, { maplibregl })
-      map.addControl(geocoder, 'top-left')
-    }
-    
-    initMap()
-  }, [])
-  
-  return <div id="map" style={{ width: '100%', height: '600px' }} />
-}
 ```
 
 ## TypeScript Support
