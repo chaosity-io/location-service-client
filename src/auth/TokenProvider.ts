@@ -1,4 +1,3 @@
-import ClientOAuth2 from 'client-oauth2'
 import debug from 'debug'
 
 const log = debug('location-client:auth')
@@ -32,7 +31,7 @@ export interface TokenProviderConfig {
  * 
  * @example
  * // ✓ Correct: Server-side usage
- * import { TokenProvider } from '@chaosity/location-client'
+ * import { TokenProvider } from '@chaosity/location-client/server'
  * 
  * const provider = new TokenProvider({
  *   apiUrl: process.env.API_URL!,
@@ -48,7 +47,6 @@ export class TokenProvider {
   private config: TokenProviderConfig
   private cachedToken?: string
   private cachedExpiresAt?: number
-  private oauth2Client: ClientOAuth2
   private tokenPromise?: Promise<TokenResponse>
 
   constructor(config: TokenProviderConfig) {
@@ -63,11 +61,6 @@ export class TokenProvider {
 
     log('Initializing TokenProvider for %s', config.apiUrl)
     this.config = config
-    this.oauth2Client = new ClientOAuth2({
-      clientId: config.clientId,
-      clientSecret: config.clientSecret,
-      accessTokenUri: `${config.apiUrl}/auth/token`,
-    })
   }
 
   async getToken(forceRefresh = false): Promise<TokenResponse> {
@@ -104,18 +97,41 @@ export class TokenProvider {
 
   private async fetchToken(): Promise<TokenResponse> {
     try {
-      const token = await this.oauth2Client.credentials.getToken()
-      this.cachedToken = token.accessToken
+      const { clientId, clientSecret, apiUrl } = this.config
+      const credentials = btoa(`${clientId}:${clientSecret}`)
 
-      // Use expires_in from OAuth2 response (standard)
-      const expiresIn = token.data?.expires_in || 900 // Default 15 minutes
-      this.cachedExpiresAt = Date.now() + (expiresIn * 1000)
+      const response = await fetch(`${apiUrl}/auth/token`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Basic ${credentials}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({ grant_type: 'client_credentials' }).toString(),
+      })
 
-      log('Token acquired successfully (expires in %ds)', expiresIn)
+      if (!response.ok) {
+        const errorText = await response.text()
+        let errorMessage = `Token request failed: ${response.statusText}`
+        try {
+          const errorData = JSON.parse(errorText)
+          if (errorData.error_description) errorMessage = errorData.error_description
+          else if (errorData.error) errorMessage = errorData.error
+        } catch { /* use statusText */ }
+        throw new Error(errorMessage)
+      }
+
+      const data = await response.json()
+      this.cachedToken = data.access_token
+
+      // Prefer absolute expires_at (ms) from response, fall back to expires_in (seconds)
+      this.cachedExpiresAt = data.expires_at ?? (Date.now() + ((data.expires_in ?? 900) * 1000))
+
+      const expiresInSec = Math.floor((this.cachedExpiresAt! - Date.now()) / 1000)
+      log('Token acquired successfully (expires in %ds)', expiresInSec)
       return {
         success: true,
         token: this.cachedToken,
-        expiresAt: this.cachedExpiresAt
+        expiresAt: this.cachedExpiresAt,
       }
     } catch (error) {
       log('Token acquisition failed: %s', error instanceof Error ? error.message : 'Unknown error')

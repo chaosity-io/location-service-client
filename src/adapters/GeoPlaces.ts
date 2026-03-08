@@ -1,12 +1,39 @@
-import { GeocodeAdditionalFeature, GeocodeCommand, GeocodeCommandInput, GeocodeFilterPlaceType, GeocodeResponse, GetPlaceAdditionalFeature, GetPlaceCommand, ReverseGeocodeCommand, SuggestAdditionalFeature, SuggestCommand, SuggestResponse, type GetPlaceResponse, type ReverseGeocodeResponse } from '@aws-sdk/client-geo-places'
-import { geocodeResponseToFeatureCollection, getPlaceResponseToFeatureCollection, reverseGeocodeResponseToFeatureCollection, suggestResponseToFeatureCollection } from '@aws/amazon-location-utilities-datatypes'
-import type { CarmenGeojsonFeature, MaplibreGeocoderApi, MaplibreGeocoderApiConfig, MaplibreGeocoderFeatureResults, MaplibreGeocoderPlaceResults, MaplibreGeocoderSuggestionResults } from '@maplibre/maplibre-gl-geocoder'
+import {
+  GeocodeAdditionalFeature,
+  GeocodeCommand,
+  type GeocodeCommandInput,
+  type GeocodeResponse,
+  GetPlaceAdditionalFeature,
+  GetPlaceCommand,
+  type GetPlaceResponse,
+  ReverseGeocodeCommand,
+  type ReverseGeocodeResponse,
+  SuggestAdditionalFeature,
+  SuggestCommand,
+  type SuggestResponse,
+} from '@aws-sdk/client-geo-places'
+import {
+  geocodeResponseToFeatureCollection,
+  getPlaceResponseToFeatureCollection,
+  reverseGeocodeResponseToFeatureCollection,
+} from '@aws/amazon-location-utilities-datatypes'
+import type {
+  CarmenGeojsonFeature,
+  MaplibreGeocoderApi,
+  MaplibreGeocoderApiConfig,
+  MaplibreGeocoderFeatureResults,
+  MaplibreGeocoderPlaceResults,
+  MaplibreGeocoderSuggestionResults,
+} from '@maplibre/maplibre-gl-geocoder'
 import type { Map } from 'maplibre-gl'
+import debug from 'debug'
 import { GeoPlacesClient } from '../client/GeoPlacesClient'
+
+const log = debug('location-client:geocoder')
 
 /**
  * GeoPlaces - MapLibre adapter for AWS Location Service
- * 
+ *
  * Implements MaplibreGeocoderApi interface for compatibility with @maplibre/maplibre-gl-geocoder
  */
 export class GeoPlaces implements MaplibreGeocoderApi {
@@ -25,90 +52,7 @@ export class GeoPlaces implements MaplibreGeocoderApi {
   }
 
   async forwardGeocode(config: MaplibreGeocoderApiConfig): Promise<MaplibreGeocoderFeatureResults> {
-    console.log('[GeoPlaces] forwardGeocode called with:', config)
-
-    const center = this.map.getCenter()
-    const biasPosition = config.proximity && config.proximity.length >= 2
-      ? [config.proximity[0], config.proximity[1]]
-      : [center.lng, center.lat]
-
-    const commandInput: any = {
-      QueryText: config.query as string,
-      BiasPosition: biasPosition,
-      MaxResults: config.limit || 5,
-      Language: this.normalizeLanguage(config.language),
-    }
-
-    if (config.countries || config.bbox) {
-      commandInput.Filter = {}
-      if (config.countries) commandInput.Filter.IncludeCountries = config.countries
-      if (config.bbox) commandInput.Filter.BoundingBox = config.bbox
-    }
-
-    console.log('[GeoPlaces] Sending SearchTextCommand with:', commandInput)
-    const command = new GeocodeCommand(commandInput)
-    const response = await this.client.send(command) as GeocodeResponse
-    console.log('[GeoPlaces] SearchTextCommand response:', response)
-
-    const result = geocodeResponseToFeatureCollection(response, { flattenProperties: true }) as MaplibreGeocoderFeatureResults
-    console.log('[GeoPlaces] Converted to FeatureCollection:', result)
-    return result
-  }
-
-  async reverseGeocode(config: MaplibreGeocoderApiConfig): Promise<MaplibreGeocoderFeatureResults> {
-    console.log('[GeoPlaces] reverseGeocode called with:', config)
-
-    const queryPosition = Array.isArray(config.query) && config.query.length >= 2
-      ? [config.query[0], config.query[1]]
-      : [0, 0]
-
-    const commandInput: any = {
-      QueryPosition: queryPosition,
-      MaxResults: config.limit || 1,
-      Language: this.normalizeLanguage(config.language)
-    }
-
-    if (config.countries) {
-      commandInput.Filter = { IncludeCountries: config.countries }
-    }
-
-    const command = new ReverseGeocodeCommand(commandInput)
-    const response = await this.client.send(command) as ReverseGeocodeResponse
-    const maplibreGeocoderFeatureResults: MaplibreGeocoderFeatureResults = reverseGeocodeResponseToFeatureCollection(response, { flattenProperties: true }) as MaplibreGeocoderFeatureResults
-    maplibreGeocoderFeatureResults.features.forEach(feature => {
-
-    })
-    console.log('[GeoPlaces] Converted to FeatureCollection:', maplibreGeocoderFeatureResults)
-    return maplibreGeocoderFeatureResults
-
-
-  }
-
-  async getSuggestions(config: MaplibreGeocoderApiConfig): Promise<MaplibreGeocoderSuggestionResults> {
-
-
-    // const center = this.map.getCenter()
-    // const biasPosition = config.proximity && config.proximity.length >= 2
-    //   ? [config.proximity[0], config.proximity[1]]
-    //   : [center.lng, center.lat]
-
-    // const commandInput: any = {
-    //   QueryText: config.query as string,
-    //   BiasPosition: biasPosition,
-    //   MaxResults: config.limit || 5,
-    //   Language: this.normalizeLanguage(config.language),
-    //   AdditionalFeatures: [SuggestAdditionalFeature.CORE],
-    // }
-
-    // if (config.countries || config.bbox) {
-    //   commandInput.Filter = {}
-    //   if (config.countries) commandInput.Filter.IncludeCountries = config.countries
-    //   if (config.bbox) commandInput.Filter.BoundingBox = config.bbox
-    // }
-
-
-    // const command = new SuggestCommand(commandInput)
-    // const response = await this.client.send(command) as SuggestResponse
+    log('forwardGeocode query=%s', config.query)
 
     const center = this.map.getCenter()
     const biasPosition = config.proximity && config.proximity.length >= 2
@@ -120,65 +64,105 @@ export class GeoPlaces implements MaplibreGeocoderApi {
       BiasPosition: biasPosition,
       MaxResults: config.limit || 5,
       Language: this.normalizeLanguage(config.language),
-      AdditionalFeatures: [GeocodeAdditionalFeature.SECONDARY_ADDRESSES],
     }
 
-    if (config.countries || config.bbox) {
-      commandInput.Filter = {}
-      if (config.countries) commandInput.Filter.IncludeCountries = Array.isArray(config.countries) ? config.countries : config.countries.split(',')
-      // if (config.types) commandInput.Filter.IncludePlaceTypes = config.types.split(',').map(type => new GeocodeFilterPlaceType)
-    }
-
-    console.log('[GeoPlaces] Sending SearchTextCommand with:', commandInput)
-    const command = new GeocodeCommand(commandInput)
-    const response = await this.client.send(command) as GeocodeResponse
-    console.log('[GeoPlaces] SearchTextCommand response:', response)
-
-
-    const maplibreGeocoderSuggestionResults: MaplibreGeocoderSuggestionResults = { suggestions: [] };
-    response?.ResultItems?.forEach(item => {
-      const text = item?.Title || item?.Address?.Label;
-      const placeId = item?.PlaceId;
-      if (text) {
-        maplibreGeocoderSuggestionResults.suggestions.push({
-          text,
-          placeId,
-        });
+    if (config.countries) {
+      commandInput.Filter = {
+        IncludeCountries: Array.isArray(config.countries) ? config.countries : config.countries.split(','),
       }
-    });
+    }
 
-    console.log('[GeoPlaces] Converted to MaplibreGeocoderSuggestionResults:', maplibreGeocoderSuggestionResults);
+    const response = await this.client.send(new GeocodeCommand(commandInput)) as GeocodeResponse
+    const result = geocodeResponseToFeatureCollection(response, { flattenProperties: true }) as MaplibreGeocoderFeatureResults
+    log('forwardGeocode returned %d results', result.features?.length ?? 0)
+    return result
+  }
 
-    return maplibreGeocoderSuggestionResults
+  async reverseGeocode(config: MaplibreGeocoderApiConfig): Promise<MaplibreGeocoderFeatureResults> {
+    log('reverseGeocode query=%o', config.query)
+
+    const queryPosition = Array.isArray(config.query) && config.query.length >= 2
+      ? [config.query[0], config.query[1]]
+      : [0, 0]
+
+    const commandInput = {
+      QueryPosition: queryPosition,
+      MaxResults: config.limit || 1,
+      Language: this.normalizeLanguage(config.language),
+    }
+
+    const response = await this.client.send(new ReverseGeocodeCommand(commandInput)) as ReverseGeocodeResponse
+    const result = reverseGeocodeResponseToFeatureCollection(response, { flattenProperties: true }) as MaplibreGeocoderFeatureResults
+    log('reverseGeocode returned %d results', result.features?.length ?? 0)
+    return result
+  }
+
+  async getSuggestions(config: MaplibreGeocoderApiConfig): Promise<MaplibreGeocoderSuggestionResults> {
+    log('getSuggestions query=%s', config.query)
+
+    const center = this.map.getCenter()
+    const biasPosition = config.proximity && config.proximity.length >= 2
+      ? [config.proximity[0], config.proximity[1]]
+      : [center.lng, center.lat]
+
+    const commandInput = {
+      QueryText: config.query as string,
+      BiasPosition: biasPosition,
+      MaxResults: config.limit || 5,
+      Language: this.normalizeLanguage(config.language),
+      AdditionalFeatures: [SuggestAdditionalFeature.CORE],
+      ...(config.countries || config.bbox ? {
+        Filter: {
+          ...(config.countries ? { IncludeCountries: Array.isArray(config.countries) ? config.countries : config.countries.split(',') } : {}),
+          ...(config.bbox ? { BoundingBox: config.bbox } : {}),
+        },
+      } : {}),
+    }
+
+    const response = await this.client.send(new SuggestCommand(commandInput)) as SuggestResponse
+    const suggestions: MaplibreGeocoderSuggestionResults = { suggestions: [] }
+
+    for (const item of response.ResultItems ?? []) {
+      const text = item.Title
+      if (!text) continue
+      const placeId = item.Place?.PlaceId
+      suggestions.suggestions.push({ text, placeId })
+    }
+
+    log('getSuggestions returned %d suggestions', suggestions.suggestions.length)
+    return suggestions
   }
 
   async searchByPlaceId(config: MaplibreGeocoderApiConfig): Promise<MaplibreGeocoderPlaceResults> {
-    console.log('[GeoPlaces] searchByPlaceId called with:', config)
-    const placeId = config.query as string
+    log('searchByPlaceId placeId=%s', config.query)
+
     const command = new GetPlaceCommand({
-      PlaceId: placeId,
+      PlaceId: config.query as string,
       Language: this.normalizeLanguage(config.language),
-      AdditionalFeatures: [GetPlaceAdditionalFeature.ACCESS, GetPlaceAdditionalFeature.SECONDARY_ADDRESSES, GetPlaceAdditionalFeature.CONTACT, GetPlaceAdditionalFeature.TIME_ZONE],
+      AdditionalFeatures: [
+        GetPlaceAdditionalFeature.ACCESS,
+        GetPlaceAdditionalFeature.SECONDARY_ADDRESSES,
+        GetPlaceAdditionalFeature.CONTACT,
+        GetPlaceAdditionalFeature.TIME_ZONE,
+      ],
     })
 
     const response = await this.client.send(command) as GetPlaceResponse
     const result = getPlaceResponseToFeatureCollection(response, { flattenProperties: true })
-    console.log('[GeoPlaces] GetPlaceCommand response converted to FeatureCollection:', result)
 
     const carmenGeojsonFeatures = result.features.map(feature => ({
       ...feature,
       text: response.Title || '',
       place_name: response.Address?.Label || '',
       place_type: response.PlaceType ? [response.PlaceType] : [],
-      bbox: response.MapView as [number, number, number, number] | undefined
+      bbox: response.MapView as [number, number, number, number] | undefined,
     })) as CarmenGeojsonFeature[]
 
-    console.log('[GeoPlaces] Converted to CarmenGeojsonFeatures:', carmenGeojsonFeatures)
+    log('searchByPlaceId returned %d features', carmenGeojsonFeatures.length)
     return { place: carmenGeojsonFeatures } as MaplibreGeocoderPlaceResults
   }
 
   async localGeocode(config: MaplibreGeocoderApiConfig): Promise<MaplibreGeocoderFeatureResults> {
-    console.log('[GeoPlaces] localGeocode called with:', config)
     return this.forwardGeocode(config)
   }
 }

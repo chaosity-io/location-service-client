@@ -1,6 +1,6 @@
 {
   "name": "@chaosity/location-client",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Client library for Chaosity Location Service with AWS Location Service compatibility",
   "type": "module",
   "main": "dist/index.js",
@@ -44,8 +44,7 @@
     "@aws-sdk/client-geo-places": "^3.0.0",
     "@aws/amazon-location-utilities-datatypes": "^1.0.0",
     "@maplibre/maplibre-gl-geocoder": "^1.9.4",
-    "client-oauth2": "^4.3.3",
-    "debug": "^4.4.3"
+"debug": "^4.4.3"
   },
   "peerDependencies": {
     "maplibre-gl": "^5.0.0"

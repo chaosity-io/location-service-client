@@ -66,9 +66,13 @@ export class LocationServiceConnector {
     const config = await this.configPromise
 
     // Get token - ConnectorConfig may have getToken, ServerClientConfig has static token
-    const token = 'getToken' in config && config.getToken
-      ? (await config.getToken()).token
-      : config.token
+    let token: string | undefined
+    if ('getToken' in config && typeof config.getToken === 'function') {
+      const result = await config.getToken()
+      token = result ? (typeof result === 'string' ? result : result.token) : undefined
+    } else {
+      token = (config as ConnectorConfig).token
+    }
 
     if (!token) {
       throw new Error('No token available')
@@ -122,25 +126,13 @@ export class LocationServiceConnector {
   }
 
   private getEndpoint(command: any): string {
-    const commandName = command.constructor.name
-
-    switch (commandName) {
-      case 'AutocompleteCommand':
-        return '/address/autocomplete'
-      case 'GeocodeCommand':
-        return '/address/geocode'
-      case 'GetPlaceCommand':
-        return '/address/place'
-      case 'ReverseGeocodeCommand':
-        return '/address/search/reverse-geocode'
-      case 'SearchNearbyCommand':
-        return '/address/search/nearby'
-      case 'SearchTextCommand':
-        return '/address/search/text'
-      case 'SuggestCommand':
-        return '/address/suggestion'
-      default:
-        throw new Error(`Unknown command type: ${commandName}`)
-    }
+    if (command instanceof AutocompleteCommand) return '/address/autocomplete'
+    if (command instanceof GeocodeCommand) return '/address/geocode'
+    if (command instanceof GetPlaceCommand) return '/address/place'
+    if (command instanceof ReverseGeocodeCommand) return '/address/search/reverse-geocode'
+    if (command instanceof SearchNearbyCommand) return '/address/search/nearby'
+    if (command instanceof SearchTextCommand) return '/address/search/text'
+    if (command instanceof SuggestCommand) return '/address/suggestion'
+    throw new Error(`Unknown command type: ${command.constructor?.name ?? typeof command}`)
   }
 }

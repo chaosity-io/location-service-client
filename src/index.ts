@@ -1,11 +1,5 @@
-// Auth (Custom - only difference from AWS SDK)
-export { TokenProvider } from './auth/TokenProvider'
-export type { TokenResponse, TokenProviderConfig } from './auth/TokenProvider'
-
 // Client (Custom - uses our auth instead of AWS SigV4)
 export { GeoPlacesClient } from './client/GeoPlacesClient'
-
-
 
 // Re-export AWS SDK commands and types
 export * from '@aws-sdk/client-geo-places'
@@ -23,8 +17,4 @@ export { transformRequest } from './maps/Utils'
 // Custom Types
 export type { ClientConfig } from './types'
 
-// Server-only utilities
-export { getClientConfig } from './server/getClientConfig'
-export type { ServerAuthConfig } from './server/getClientConfig'
-export { LocationServiceConnector } from './server/LocationServiceConnector'
-export type { ConnectorConfig } from './server/LocationServiceConnector'
+// Server-only utilities are available via '@chaosity/location-client/server'
