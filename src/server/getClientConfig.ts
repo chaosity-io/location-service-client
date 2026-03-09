@@ -98,7 +98,14 @@ export async function getClientConfig(config: ServerAuthConfig = {}): Promise<Se
 
   if (!result.success || !result.token) {
     console.error('[getClientConfig] Token fetch failed:', result.error)
-    throw new Error(result.error || 'Failed to get token')
+    const isAuthError = result.error === 'Invalid credentials' ||
+      result.error?.toLowerCase().includes('unauthorized')
+    throw new Error(
+      isAuthError
+        ? `Authentication failed for client ID "${clientId}". ` +
+          `Verify LOCATION_CLIENT_ID and LOCATION_CLIENT_SECRET match your application in the developer portal.`
+        : (result.error || 'Failed to get token')
+    )
   }
 
   log('[getClientConfig] Token fetched successfully, length:', result.token.length)
