@@ -13,6 +13,11 @@ export { GeoPlaces } from './adapters/GeoPlaces'
 // Maps utilities
 export { createTransformRequest } from './maps/createTransformRequest'
 export { transformRequest } from './maps/Utils'
+export { buildMapStyleUrl, fetchMapStyle } from './maps/mapStyle'
+export type { MapStyleOptions } from './maps/mapStyle'
+export { applyMapLanguage } from './maps/mapLanguage'
+export { setPoiVisibility, setAllPoiVisibility, POI_CATEGORIES } from './maps/mapPoi'
+export type { PoiCategory } from './maps/mapPoi'
 
 // Custom Types
 export type { ClientConfig } from './types'
