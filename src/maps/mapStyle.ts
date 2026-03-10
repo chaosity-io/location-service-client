@@ -13,8 +13,8 @@ export interface MapStyleOptions {
   terrain?: 'Hillshade' | 'Terrain3D'
   /** Enable 3D building extrusions. */
   buildings?: 'Buildings3D'
-  /** Elevation contour line density. */
-  contourDensity?: 'Low' | 'Medium' | 'High'
+  /** Elevation contour line density. Only 'Medium' is currently supported by the AWS SDK. */
+  contourDensity?: 'Medium'
   /** Enable real-time traffic flow visualization. */
   traffic?: 'All'
   /** Travel mode overlays for routing-specific features. */
