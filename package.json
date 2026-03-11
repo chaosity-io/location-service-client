@@ -1,6 +1,6 @@
 {
   "name": "@chaosity/location-client",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "description": "Client library for Chaosity Location Service with AWS Location Service compatibility",
   "type": "module",
   "main": "dist/index.js",
