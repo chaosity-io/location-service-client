@@ -9,6 +9,7 @@ import {
   SuggestCommand,
 } from '@aws-sdk/client-geo-places'
 import { ClientConfig } from '../types'
+import { roundPositionFields } from '../utils/roundPosition'
 
 const log = debug('location-client:api')
 const logError = debug('location-client:api:error')
@@ -45,7 +46,7 @@ export class GeoPlacesClient {
     const endpoint = this.getEndpoint(command)
     const url = `${this.clientConfig.apiUrl}${endpoint}`
     const commandName = (command as any).constructor.name
-    const input = (command as any).input
+    const input = roundPositionFields((command as any).input)
 
     // Prefer getToken callback (live ref) over static token string
     const token = this.clientConfig.getToken?.() ?? this.clientConfig.token

@@ -10,6 +10,7 @@ import {
 } from '@aws-sdk/client-geo-places'
 import debug from 'debug'
 import { getClientConfig, ServerClientConfig } from './getClientConfig'
+import { roundPositionFields } from '../utils/roundPosition'
 
 const log = debug('location-client:connector')
 
@@ -81,7 +82,7 @@ export class LocationServiceConnector {
     const endpoint = this.getEndpoint(command)
     const url = `${config.apiUrl}${endpoint}`
     const commandName = (command as any).constructor.name
-    const input = (command as any).input
+    const input = roundPositionFields((command as any).input)
 
     log('Sending %s request to %s', commandName, endpoint)
     const startTime = Date.now()

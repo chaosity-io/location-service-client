@@ -28,6 +28,9 @@ npm install @chaosity/location-client
 - **AWS SDK Commands**: Full access to all AWS Location Service commands
 - **Data Type Utilities**: Built-in GeoJSON conversion utilities
 - **MapLibre Integration**: Adapter for MapLibre GL Geocoder and `createTransformRequest` helper
+- **Map Style Control**: Fetch and customize map style descriptors with terrain, 3D buildings, traffic, and more
+- **Map Language**: Switch map label language client-side with zero API calls
+- **POI Layer Control**: Toggle point-of-interest categories on/off by layer
 - **Server Utilities**: `getClientConfig()` with auto-env detection and token caching
 
 ## Quick Start
@@ -84,22 +87,61 @@ const response = await client.send(
 
 ### MapLibre Map Integration
 
-Use `createTransformRequest` to automatically attach Bearer tokens to map tile requests:
+Use `fetchMapStyle` to fetch a style descriptor with authentication and optional customization, and `createTransformRequest` to attach Bearer tokens to all subsequent tile/glyph/sprite requests:
 
 ```typescript
-import { createTransformRequest } from '@chaosity/location-client'
+import { fetchMapStyle, createTransformRequest } from '@chaosity/location-client'
 import maplibregl from 'maplibre-gl'
+
+const style = await fetchMapStyle(apiUrl, 'Standard', getToken, {
+  colorScheme: 'Dark',
+  terrain: 'Terrain3D',
+  buildings: 'Buildings3D',
+  language: 'fr',
+})
 
 const map = new maplibregl.Map({
   container: 'map',
-  style: `${apiUrl}/maps/Standard/descriptor`,
+  style,
   center: [-123.12, 49.28],
   zoom: 10,
+  maxPitch: 85,
   transformRequest: createTransformRequest(apiUrl, getToken),
 })
 ```
 
-`createTransformRequest` handles setting the correct `Accept` headers for tiles (protobuf), glyphs, sprites, and style descriptors.
+### Switching Map Language
+
+Change map label language instantly on the client side — no API calls needed:
+
+```typescript
+import { applyMapLanguage } from '@chaosity/location-client'
+
+// Apply after the style is loaded
+map.once('style.load', () => applyMapLanguage(map, 'fr'))
+
+// Or reapply whenever the user changes language
+applyMapLanguage(map, 'ja')
+```
+
+### Controlling POI Layers
+
+Toggle point-of-interest categories on or off:
+
+```typescript
+import { setPoiVisibility, setAllPoiVisibility, POI_CATEGORIES } from '@chaosity/location-client'
+
+// Hide transit POIs
+setPoiVisibility(map, 'transit', false)
+
+// Hide multiple categories at once
+setPoiVisibility(map, ['shopping', 'business'], false)
+
+// Hide all POIs
+setAllPoiVisibility(map, false)
+```
+
+Available categories: `food_drink`, `entertainment`, `sights`, `transit`, `accommodations`, `leisure`, `shopping`, `business`, `facilities`, `areas`, `parks`.
 
 ### MapLibre Geocoder Integration
 
@@ -172,6 +214,70 @@ import { createTransformRequest } from '@chaosity/location-client'
 const transformRequest = createTransformRequest(apiUrl, () => currentToken)
 ```
 
+#### fetchMapStyle
+
+Fetches the map style descriptor with Bearer auth and applies optional language to the descriptor JSON before MapLibre processes it (eliminates the visual flash that occurs when modifying layers post-load).
+
+```typescript
+import { fetchMapStyle } from '@chaosity/location-client'
+
+const style = await fetchMapStyle(apiUrl, 'Standard', getToken, {
+  colorScheme: 'Dark',
+  terrain: 'Terrain3D',
+  buildings: 'Buildings3D',
+  contourDensity: 'Medium',
+  traffic: 'All',
+  travelModes: ['Truck', 'Transit'],
+  language: 'fr',
+})
+
+const map = new maplibregl.Map({ style, transformRequest: createTransformRequest(apiUrl, getToken) })
+```
+
+#### buildMapStyleUrl
+
+Builds the style descriptor URL without fetching. Useful when you want to pass the URL directly to MapLibre (e.g. without pre-applying language).
+
+```typescript
+import { buildMapStyleUrl } from '@chaosity/location-client'
+
+const url = buildMapStyleUrl(apiUrl, 'Standard', { colorScheme: 'Dark', terrain: 'Hillshade' })
+```
+
+#### MapStyleOptions
+
+```typescript
+interface MapStyleOptions {
+  colorScheme?: 'Light' | 'Dark'
+  politicalView?: string          // ISO 3166-1 alpha-3 (e.g. 'IND', 'TUR')
+  terrain?: 'Hillshade' | 'Terrain3D'
+  buildings?: 'Buildings3D'
+  contourDensity?: 'Medium'       // Only 'Medium' is supported by the AWS SDK
+  traffic?: 'All'
+  travelModes?: Array<'Truck' | 'Transit'>
+}
+```
+
+#### applyMapLanguage
+
+Modifies symbol layer `text-field` expressions on an existing map to display labels in the specified language. No API call — operates entirely on the client.
+
+```typescript
+import { applyMapLanguage } from '@chaosity/location-client'
+
+applyMapLanguage(map, 'fr')
+```
+
+#### POI Layer Control
+
+```typescript
+import { setPoiVisibility, setAllPoiVisibility, POI_CATEGORIES } from '@chaosity/location-client'
+import type { PoiCategory } from '@chaosity/location-client'
+
+setPoiVisibility(map, 'transit', false)
+setAllPoiVisibility(map, false)
+```
+
 #### Available Commands
 
 All AWS Location Service commands from `@aws-sdk/client-geo-places`:
@@ -242,6 +348,14 @@ const connector = new LocationServiceConnector({
 
 const result = await connector.send(new SuggestCommand({ QueryText: 'Vancouver' }))
 ```
+
+## Cache-Friendly Position Rounding
+
+`BiasPosition` coordinates are automatically rounded to 2 decimal places (~1.1 km grid) before each API request. This maximizes cache hits across nearby users without affecting result quality — bias is approximate by nature.
+
+`QueryPosition` (reverse geocode) retains full precision since it represents an exact point the user selected.
+
+This is handled transparently in both `GeoPlacesClient` and `LocationServiceConnector` — no action needed in application code.
 
 ## Logging
 
