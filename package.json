@@ -20,7 +20,8 @@
     "dev": "tsc --watch",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "prepare": "husky"
   },
   "keywords": [
     "aws",
@@ -57,6 +58,7 @@
   "devDependencies": {
     "@types/debug": "^4.1.12",
     "@types/node": "^25.0.3",
+    "husky": "^9.0.0",
     "maplibre-gl": "^5.0.0",
     "typescript": "^5.0.0",
     "vitest": "^3.0.0"
