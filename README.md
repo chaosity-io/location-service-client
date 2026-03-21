@@ -73,14 +73,18 @@ const config = await getClientConfig({
 ### Client-Side: Using the GeoPlacesClient
 
 ```typescript
-import { GeoPlacesClient, SuggestCommand } from '@chaosity/location-client'
+import {
+  GeoPlacesClient,
+  SuggestCommand,
+  type SuggestCommandOutput,
+} from '@chaosity/location-client'
 
 const client = new GeoPlacesClient({
   apiUrl: 'https://api.chaosity.cloud',
   token: 'your-bearer-token',
 })
 
-const response = await client.send(
+const response: SuggestCommandOutput = await client.send(
   new SuggestCommand({ QueryText: 'Vancouver', MaxResults: 5 }),
 )
 ```
@@ -396,7 +400,7 @@ DEBUG=location-client:api npm run dev
 Full TypeScript support with types from AWS SDK:
 
 ```typescript
-import type { SuggestCommandOutput } from '@aws-sdk/client-geo-places'
+import type { SuggestCommandOutput } from '@chaosity/location-client'
 
 const response: SuggestCommandOutput = await client.send(
   new SuggestCommand({ QueryText: 'Vancouver' }),
