@@ -1,4 +1,4 @@
-import type { Map } from 'maplibre-gl'
+import type { MapLike } from '../types'
 
 /**
  * Apply a preferred display language to all symbol layers on a MapLibre map.
@@ -11,20 +11,25 @@ import type { Map } from 'maplibre-gl'
  * Based on the approach documented at:
  * https://docs.aws.amazon.com/location/latest/developerguide/how-to-set-preferred-language-map.html
  *
- * @param map - MapLibre Map instance
+ * @param map - MapLibre Map instance (or any object matching the MapLike interface)
  * @param language - ISO 639-1 language code (e.g. 'en', 'fr', 'de', 'ja', 'zh', 'ar')
  *
  * @example
  * map.once('style.load', () => applyMapLanguage(map, 'fr'))
  */
-export function applyMapLanguage(map: Map, language: string): void {
+export function applyMapLanguage(map: MapLike, language: string): void {
   try {
     const expression =
       language === 'en'
         ? ['coalesce', ['get', 'name:en'], ['get', 'name']]
-        : ['coalesce', ['get', `name:${language}`], ['get', 'name:en'], ['get', 'name']]
+        : [
+            'coalesce',
+            ['get', `name:${language}`],
+            ['get', 'name:en'],
+            ['get', 'name'],
+          ]
 
-    map.getStyle().layers.forEach(layer => {
+    map.getStyle().layers.forEach((layer) => {
       if (layer.type === 'symbol') {
         const textField = map.getLayoutProperty(layer.id, 'text-field')
         if (textField !== undefined && textField !== null) {

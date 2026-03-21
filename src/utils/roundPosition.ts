@@ -14,8 +14,8 @@ const BIAS_FACTOR = 10 ** BIAS_DECIMALS
 
 /** Known position field names and whether they should be rounded */
 const POSITION_FIELDS: Record<string, boolean> = {
-  BiasPosition: true,   // geocode, autocomplete, search — round for cache
-  QueryPosition: false,  // reverse geocode — keep full precision
+  BiasPosition: true, // geocode, autocomplete, search — round for cache
+  QueryPosition: false, // reverse geocode — keep full precision
 }
 
 function roundCoord(value: number): number {
@@ -26,11 +26,11 @@ function roundCoord(value: number): number {
  * Shallow-clone the input and round position arrays that benefit from caching.
  * Returns the original object if no position fields are present.
  */
-export function roundPositionFields<T extends Record<string, any>>(input: T): T {
+export function roundPositionFields<T extends object>(input: T): T {
   if (!input || typeof input !== 'object') return input
 
   let modified = false
-  const result: Record<string, any> = { ...input }
+  const result = { ...input } as Record<string, unknown>
 
   for (const [field, shouldRound] of Object.entries(POSITION_FIELDS)) {
     const value = result[field]

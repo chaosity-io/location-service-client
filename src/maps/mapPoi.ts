@@ -37,7 +37,7 @@ export type PoiCategory = keyof typeof POI_CATEGORIES
 export function setPoiVisibility(
   map: Map,
   category: PoiCategory | PoiCategory[],
-  visible: boolean
+  visible: boolean,
 ): void {
   const categories = Array.isArray(category) ? category : [category]
   const visibility = visible ? 'visible' : 'none'

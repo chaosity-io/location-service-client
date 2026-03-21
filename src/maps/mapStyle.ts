@@ -36,7 +36,7 @@ export interface MapStyleOptions {
 export function buildMapStyleUrl(
   apiUrl: string,
   mapStyle: string,
-  options: MapStyleOptions = {}
+  options: MapStyleOptions = {},
 ): string {
   const params = new URLSearchParams()
 
@@ -44,9 +44,11 @@ export function buildMapStyleUrl(
   if (options.politicalView) params.set('political-view', options.politicalView)
   if (options.terrain) params.set('terrain', options.terrain)
   if (options.buildings) params.set('buildings', options.buildings)
-  if (options.contourDensity) params.set('contour-density', options.contourDensity)
+  if (options.contourDensity)
+    params.set('contour-density', options.contourDensity)
   if (options.traffic) params.set('traffic', options.traffic)
-  if (options.travelModes?.length) params.set('travel-modes', options.travelModes.join(','))
+  if (options.travelModes?.length)
+    params.set('travel-modes', options.travelModes.join(','))
 
   const qs = params.toString()
   return `${apiUrl}/maps/${mapStyle}/descriptor${qs ? `?${qs}` : ''}`
@@ -77,7 +79,7 @@ export async function fetchMapStyle(
   apiUrl: string,
   mapStyle: string,
   getToken: () => string | undefined,
-  options: MapStyleOptions & { language?: string } = {}
+  options: MapStyleOptions & { language?: string } = {},
 ): Promise<StyleSpecification> {
   const { language, ...styleOptions } = options
   const url = buildMapStyleUrl(apiUrl, mapStyle, styleOptions)
@@ -85,16 +87,18 @@ export async function fetchMapStyle(
   const token = getToken()
   const response = await fetch(url, {
     headers: {
-      'Authorization': `Bearer ${token}`,
-      'Accept': 'application/json',
-    }
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/json',
+    },
   })
 
   if (!response.ok) {
-    throw new Error(`Failed to fetch map style: ${response.status} ${response.statusText}`)
+    throw new Error(
+      `Failed to fetch map style: ${response.status} ${response.statusText}`,
+    )
   }
 
-  const style = await response.json() as StyleSpecification
+  const style = (await response.json()) as StyleSpecification
 
   if (language) {
     applyLanguageToDescriptor(style, language)
@@ -107,11 +111,19 @@ export async function fetchMapStyle(
  * Apply a preferred language to all symbol layers within a style descriptor object.
  * Mutates the style in place — call before passing to MapLibre.
  */
-function applyLanguageToDescriptor(style: StyleSpecification, language: string): void {
+function applyLanguageToDescriptor(
+  style: StyleSpecification,
+  language: string,
+): void {
   const expression =
     language === 'en'
       ? ['coalesce', ['get', 'name:en'], ['get', 'name']]
-      : ['coalesce', ['get', `name:${language}`], ['get', 'name:en'], ['get', 'name']]
+      : [
+          'coalesce',
+          ['get', `name:${language}`],
+          ['get', 'name:en'],
+          ['get', 'name'],
+        ]
 
   for (const layer of style.layers) {
     if (layer.type === 'symbol') {

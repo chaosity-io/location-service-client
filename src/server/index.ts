@@ -1,6 +1,6 @@
+export { TokenProvider } from '../auth/TokenProvider'
+export type { TokenProviderConfig, TokenResponse } from '../auth/TokenProvider'
 export { getClientConfig } from './getClientConfig'
 export type { ServerAuthConfig, ServerClientConfig } from './getClientConfig'
 export { LocationServiceConnector } from './LocationServiceConnector'
 export type { ConnectorConfig, SendOptions } from './LocationServiceConnector'
-export { TokenProvider } from '../auth/TokenProvider'
-export type { TokenProviderConfig, TokenResponse } from '../auth/TokenProvider'

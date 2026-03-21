@@ -16,14 +16,18 @@ export { GeoPlaces } from './adapters/GeoPlaces'
 
 // Maps utilities
 export { createTransformRequest } from './maps/createTransformRequest'
-export { transformRequest } from './maps/Utils'
+export { applyMapLanguage } from './maps/mapLanguage'
+export {
+  POI_CATEGORIES,
+  setAllPoiVisibility,
+  setPoiVisibility,
+} from './maps/mapPoi'
+export type { PoiCategory } from './maps/mapPoi'
 export { buildMapStyleUrl, fetchMapStyle } from './maps/mapStyle'
 export type { MapStyleOptions } from './maps/mapStyle'
-export { applyMapLanguage } from './maps/mapLanguage'
-export { setPoiVisibility, setAllPoiVisibility, POI_CATEGORIES } from './maps/mapPoi'
-export type { PoiCategory } from './maps/mapPoi'
+export { transformRequest } from './maps/Utils'
 
 // Custom Types
-export type { ClientConfig } from './types'
+export type { ClientConfig, GeoPlacesCommand, MapLike } from './types'
 
 // Server-only utilities are available via '@chaosity/location-client/server'

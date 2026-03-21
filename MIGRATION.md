@@ -7,17 +7,19 @@
 All adapter methods now return standard GeoJSON `FeatureCollection` instead of custom `{ features: Feature[] }`.
 
 #### Before:
+
 ```typescript
 const result = await geoPlaces.forwardGeocode({ query: 'Vancouver' })
-result.features.forEach(feature => {
+result.features.forEach((feature) => {
   console.log(feature.place_name)
 })
 ```
 
 #### After:
+
 ```typescript
 const featureCollection = await geoPlaces.forwardGeocode({ query: 'Vancouver' })
-featureCollection.features.forEach(feature => {
+featureCollection.features.forEach((feature) => {
   console.log(feature.properties.place_name)
 })
 ```

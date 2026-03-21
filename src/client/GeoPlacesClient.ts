@@ -1,4 +1,3 @@
-import debug from 'debug'
 import {
   AutocompleteCommand,
   GeocodeCommand,
@@ -8,15 +7,19 @@ import {
   SearchTextCommand,
   SuggestCommand,
 } from '@aws-sdk/client-geo-places'
-import { ClientConfig } from '../types'
+import debug from 'debug'
 import { LocationServiceException } from '../errors/LocationServiceException'
+import type { ClientConfig, GeoPlacesCommand } from '../types'
 import { roundPositionFields } from '../utils/roundPosition'
 
 const log = debug('location-client:api')
 const logError = debug('location-client:api:error')
 
+// Constructor type for AWS SDK command classes
+type CommandConstructor = new (...args: never[]) => GeoPlacesCommand
+
 // Minification-safe endpoint map — uses constructor identity, not class name strings
-const ENDPOINT_MAP = new Map<Function, string>([
+const ENDPOINT_MAP = new Map<CommandConstructor, string>([
   [AutocompleteCommand, '/address/autocomplete'],
   [GeocodeCommand, '/address/geocode'],
   [GetPlaceCommand, '/address/place'],
@@ -43,11 +46,11 @@ export class GeoPlacesClient {
     this.config = { serviceId: 'Geo Places' }
   }
 
-  async send<TInput, TOutput>(command: TInput): Promise<TOutput> {
+  async send<TOutput>(command: GeoPlacesCommand): Promise<TOutput> {
     const endpoint = this.getEndpoint(command)
     const url = `${this.clientConfig.apiUrl}${endpoint}`
-    const commandName = (command as any).constructor.name
-    const input = roundPositionFields((command as any).input)
+    const commandName = command.constructor.name
+    const input = roundPositionFields(command.input)
 
     // Prefer getToken callback (live ref) over static token string
     const token = this.clientConfig.getToken?.() ?? this.clientConfig.token
@@ -59,7 +62,7 @@ export class GeoPlacesClient {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
+        Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify(input),
     })
@@ -68,7 +71,12 @@ export class GeoPlacesClient {
 
     if (!response.ok) {
       const errorText = await response.text()
-      logError('Request failed: %s %s (%dms)', response.status, response.statusText, duration)
+      logError(
+        'Request failed: %s %s (%dms)',
+        response.status,
+        response.statusText,
+        duration,
+      )
 
       let errorMessage = `API request failed: ${response.statusText}`
       let errorCode = 'ServiceException'
@@ -96,10 +104,12 @@ export class GeoPlacesClient {
     return result
   }
 
-  private getEndpoint(command: any): string {
+  private getEndpoint(command: GeoPlacesCommand): string {
     for (const [CommandClass, endpoint] of ENDPOINT_MAP) {
       if (command instanceof CommandClass) return endpoint
     }
-    throw new Error(`Unknown command type: ${(command as any).constructor?.name ?? typeof command}`)
+    throw new Error(
+      `Unknown command type: ${command.constructor?.name ?? typeof command}`,
+    )
   }
 }

@@ -81,7 +81,7 @@ const client = new GeoPlacesClient({
 })
 
 const response = await client.send(
-  new SuggestCommand({ QueryText: 'Vancouver', MaxResults: 5 })
+  new SuggestCommand({ QueryText: 'Vancouver', MaxResults: 5 }),
 )
 ```
 
@@ -90,7 +90,10 @@ const response = await client.send(
 Use `fetchMapStyle` to fetch a style descriptor with authentication and optional customization, and `createTransformRequest` to attach Bearer tokens to all subsequent tile/glyph/sprite requests:
 
 ```typescript
-import { fetchMapStyle, createTransformRequest } from '@chaosity/location-client'
+import {
+  fetchMapStyle,
+  createTransformRequest,
+} from '@chaosity/location-client'
 import maplibregl from 'maplibre-gl'
 
 const style = await fetchMapStyle(apiUrl, 'Standard', getToken, {
@@ -129,7 +132,11 @@ applyMapLanguage(map, 'ja')
 Toggle point-of-interest categories on or off:
 
 ```typescript
-import { setPoiVisibility, setAllPoiVisibility, POI_CATEGORIES } from '@chaosity/location-client'
+import {
+  setPoiVisibility,
+  setAllPoiVisibility,
+  POI_CATEGORIES,
+} from '@chaosity/location-client'
 
 // Hide transit POIs
 setPoiVisibility(map, 'transit', false)
@@ -231,7 +238,10 @@ const style = await fetchMapStyle(apiUrl, 'Standard', getToken, {
   language: 'fr',
 })
 
-const map = new maplibregl.Map({ style, transformRequest: createTransformRequest(apiUrl, getToken) })
+const map = new maplibregl.Map({
+  style,
+  transformRequest: createTransformRequest(apiUrl, getToken),
+})
 ```
 
 #### buildMapStyleUrl
@@ -241,7 +251,10 @@ Builds the style descriptor URL without fetching. Useful when you want to pass t
 ```typescript
 import { buildMapStyleUrl } from '@chaosity/location-client'
 
-const url = buildMapStyleUrl(apiUrl, 'Standard', { colorScheme: 'Dark', terrain: 'Hillshade' })
+const url = buildMapStyleUrl(apiUrl, 'Standard', {
+  colorScheme: 'Dark',
+  terrain: 'Hillshade',
+})
 ```
 
 #### MapStyleOptions
@@ -249,10 +262,10 @@ const url = buildMapStyleUrl(apiUrl, 'Standard', { colorScheme: 'Dark', terrain:
 ```typescript
 interface MapStyleOptions {
   colorScheme?: 'Light' | 'Dark'
-  politicalView?: string          // ISO 3166-1 alpha-3 (e.g. 'IND', 'TUR')
+  politicalView?: string // ISO 3166-1 alpha-3 (e.g. 'IND', 'TUR')
   terrain?: 'Hillshade' | 'Terrain3D'
   buildings?: 'Buildings3D'
-  contourDensity?: 'Medium'       // Only 'Medium' is supported by the AWS SDK
+  contourDensity?: 'Medium' // Only 'Medium' is supported by the AWS SDK
   traffic?: 'All'
   travelModes?: Array<'Truck' | 'Transit'>
 }
@@ -271,7 +284,11 @@ applyMapLanguage(map, 'fr')
 #### POI Layer Control
 
 ```typescript
-import { setPoiVisibility, setAllPoiVisibility, POI_CATEGORIES } from '@chaosity/location-client'
+import {
+  setPoiVisibility,
+  setAllPoiVisibility,
+  POI_CATEGORIES,
+} from '@chaosity/location-client'
 import type { PoiCategory } from '@chaosity/location-client'
 
 setPoiVisibility(map, 'transit', false)
@@ -346,7 +363,9 @@ const connector = new LocationServiceConnector({
   token: config.token,
 })
 
-const result = await connector.send(new SuggestCommand({ QueryText: 'Vancouver' }))
+const result = await connector.send(
+  new SuggestCommand({ QueryText: 'Vancouver' }),
+)
 ```
 
 ## Cache-Friendly Position Rounding
@@ -380,7 +399,7 @@ Full TypeScript support with types from AWS SDK:
 import type { SuggestCommandOutput } from '@aws-sdk/client-geo-places'
 
 const response: SuggestCommandOutput = await client.send(
-  new SuggestCommand({ QueryText: 'Vancouver' })
+  new SuggestCommand({ QueryText: 'Vancouver' }),
 )
 ```
 

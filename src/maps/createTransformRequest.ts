@@ -3,14 +3,14 @@ import type { RequestTransformFunction } from 'maplibre-gl'
 /**
  * Creates a transformRequest function for MapLibre that adds authentication
  * and proper Accept headers for AWS Location Service API requests.
- * 
+ *
  * @param apiUrl - Base URL of the Location Service API
  * @param getToken - Callback function that returns the current auth token
  * @returns MapLibre transformRequest function
  */
 export function createTransformRequest(
   apiUrl: string,
-  getToken: () => string | undefined
+  getToken: () => string | undefined,
 ): RequestTransformFunction {
   return (url: string, resourceType?: string) => {
     if (url.startsWith(apiUrl)) {
@@ -21,7 +21,7 @@ export function createTransformRequest(
       }
 
       const headers: Record<string, string> = {
-        'Authorization': `Bearer ${token}`,
+        Authorization: `Bearer ${token}`,
       }
 
       // Set appropriate Accept headers based on resource type

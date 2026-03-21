@@ -5,6 +5,7 @@
 **Reuse AWS SDK, Override Auth Only**
 
 The only difference between this client and AWS SDK is the authentication method:
+
 - AWS SDK: SigV4 (IAM credentials)
 - This client: Bearer token (OAuth2)
 
@@ -13,19 +14,23 @@ Everything else is identical to AWS SDK.
 ## Architecture Layers
 
 ### 1. Auth Layer (Custom)
+
 - `AuthHelper` - Token management and refresh
 - `AuthClient` - OAuth2 client credentials flow
 
 ### 2. Client Layer (Custom wrapper, AWS SDK commands)
+
 - `GeoPlacesClient` - Wraps AWS SDK commands with Bearer auth
 - Uses AWS SDK command classes directly (no custom commands)
 
 ### 3. Adapter Layer (Custom)
+
 - `GeoPlaces` - Converts AWS SDK responses to MapLibre GeoJSON format
 
 ## What's Custom vs AWS SDK
 
 ### Custom (Maintained by us)
+
 ```typescript
 // Auth
 AuthHelper
@@ -39,6 +44,7 @@ GeoPlaces // Converts to MapLibre format
 ```
 
 ### From AWS Location Libraries (Zero maintenance)
+
 ```typescript
 // Commands from AWS Location Client
 import { places, maps, routes } from '@aws/amazon-location-client'
@@ -71,7 +77,11 @@ import {
 
 ```typescript
 // 1. Import AWS Location Client commands
-import { GeoPlacesClient, places, placeToFeatureCollection } from '@chaosity/location-client'
+import {
+  GeoPlacesClient,
+  places,
+  placeToFeatureCollection,
+} from '@chaosity/location-client'
 
 // 2. Create client with Bearer token auth
 const client = new GeoPlacesClient({ apiUrl, token })
@@ -87,6 +97,7 @@ const featureCollection = placeToFeatureCollection(response)
 ## Comparison with AWS SDK
 
 ### AWS Location Client
+
 ```typescript
 import { GeoPlacesClient, places } from '@aws/amazon-location-client'
 import { withAPIKey } from '@aws/amazon-location-client'
@@ -99,12 +110,13 @@ const response = await client.send(command)
 ```
 
 ### Our Client
+
 ```typescript
 import { GeoPlacesClient, places } from '@chaosity/location-client'
 
 const client = new GeoPlacesClient({
   apiUrl: 'https://api.example.com',
-  token: 'bearer-token'
+  token: 'bearer-token',
 })
 
 const command = new places.SuggestCommand({ QueryText: 'Vancouver' })

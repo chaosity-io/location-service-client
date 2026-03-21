@@ -1,4 +1,3 @@
-import { LocationServiceException } from '../errors/LocationServiceException'
 import {
   AutocompleteCommand,
   GeocodeCommand,
@@ -9,8 +8,11 @@ import {
   SuggestCommand,
 } from '@aws-sdk/client-geo-places'
 import debug from 'debug'
-import { getClientConfig, ServerClientConfig } from './getClientConfig'
+import { LocationServiceException } from '../errors/LocationServiceException'
+import type { GeoPlacesCommand } from '../types'
 import { roundPositionFields } from '../utils/roundPosition'
+import type { ServerClientConfig } from './getClientConfig'
+import { getClientConfig } from './getClientConfig'
 
 const log = debug('location-client:connector')
 
@@ -26,26 +28,26 @@ export interface SendOptions {
 
 /**
  * LocationServiceConnector - Server-side connector for Location Service API
- * 
+ *
  * Optimized for backend-to-backend communication with:
  * - Automatic configuration from environment variables
  * - Automatic Origin header handling
  * - Server-side token management
  * - Enhanced error handling
- * 
+ *
  * Uses AWS SDK command classes with Bearer token authentication.
- * 
+ *
  * @example
  * ```typescript
  * // Auto-detect from environment
  * const connector = new LocationServiceConnector()
- * 
+ *
  * // Or provide explicit config
  * const connector = new LocationServiceConnector({
  *   apiUrl: 'https://api.example.com',
  *   token: 'your-token'
  * })
- * 
+ *
  * // Send with custom headers (including Origin)
  * const result = await connector.send(
  *   new SearchTextCommand({ QueryText: 'Space Needle' }),
@@ -58,19 +60,24 @@ export class LocationServiceConnector {
   public readonly serviceId: string = 'Geo Places'
 
   constructor(config?: ConnectorConfig) {
-    this.configPromise = config
-      ? Promise.resolve(config)
-      : getClientConfig()
+    this.configPromise = config ? Promise.resolve(config) : getClientConfig()
   }
 
-  async send<TInput, TOutput>(command: TInput, options?: SendOptions): Promise<TOutput> {
+  async send<TOutput>(
+    command: GeoPlacesCommand,
+    options?: SendOptions,
+  ): Promise<TOutput> {
     const config = await this.configPromise
 
     // Get token - ConnectorConfig may have getToken, ServerClientConfig has static token
     let token: string | undefined
     if ('getToken' in config && typeof config.getToken === 'function') {
       const result = await config.getToken()
-      token = result ? (typeof result === 'string' ? result : result.token) : undefined
+      token = result
+        ? typeof result === 'string'
+          ? result
+          : result.token
+        : undefined
     } else {
       token = (config as ConnectorConfig).token
     }
@@ -81,8 +88,8 @@ export class LocationServiceConnector {
 
     const endpoint = this.getEndpoint(command)
     const url = `${config.apiUrl}${endpoint}`
-    const commandName = (command as any).constructor.name
-    const input = roundPositionFields((command as any).input)
+    const commandName = command.constructor.name
+    const input = roundPositionFields(command.input)
 
     log('Sending %s request to %s', commandName, endpoint)
     const startTime = Date.now()
@@ -91,20 +98,25 @@ export class LocationServiceConnector {
     const headers: Record<string, string> = {
       ...(options?.headers || {}),
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`
+      Authorization: `Bearer ${token}`,
     }
 
     const response = await fetch(url, {
       method: 'POST',
       headers,
-      body: JSON.stringify(input)
+      body: JSON.stringify(input),
     })
 
     const duration = Date.now() - startTime
 
     if (!response.ok) {
       const errorText = await response.text()
-      log('Request failed: %s %s (%dms)', response.status, response.statusText, duration)
+      log(
+        'Request failed: %s %s (%dms)',
+        response.status,
+        response.statusText,
+        duration,
+      )
 
       let errorMessage = `API request failed: ${response.statusText}`
       let errorCode = 'ServiceException'
@@ -132,14 +144,17 @@ export class LocationServiceConnector {
     return result
   }
 
-  private getEndpoint(command: any): string {
+  private getEndpoint(command: GeoPlacesCommand): string {
     if (command instanceof AutocompleteCommand) return '/address/autocomplete'
     if (command instanceof GeocodeCommand) return '/address/geocode'
     if (command instanceof GetPlaceCommand) return '/address/place'
-    if (command instanceof ReverseGeocodeCommand) return '/address/search/reverse-geocode'
+    if (command instanceof ReverseGeocodeCommand)
+      return '/address/search/reverse-geocode'
     if (command instanceof SearchNearbyCommand) return '/address/search/nearby'
     if (command instanceof SearchTextCommand) return '/address/search/text'
     if (command instanceof SuggestCommand) return '/address/suggestion'
-    throw new Error(`Unknown command type: ${command.constructor?.name ?? typeof command}`)
+    throw new Error(
+      `Unknown command type: ${command.constructor?.name ?? typeof command}`,
+    )
   }
 }

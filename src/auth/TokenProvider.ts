@@ -17,28 +17,28 @@ export interface TokenProviderConfig {
 
 /**
  * TokenProvider - SERVER-SIDE ONLY
- * 
+ *
  * ⚠️ WARNING: This class requires client credentials (clientId and clientSecret)
  * and must NEVER be used in browser/client-side code.
- * 
+ *
  * Use this only in:
  * - Node.js server environments
  * - Next.js Server Actions (marked with 'use server')
  * - Next.js API routes
  * - Backend services
- * 
+ *
  * For browser usage, use the React provider which receives tokens from server-side code.
- * 
+ *
  * @example
  * // ✓ Correct: Server-side usage
  * import { TokenProvider } from '@chaosity/location-client/server'
- * 
+ *
  * const provider = new TokenProvider({
  *   apiUrl: process.env.API_URL!,
  *   clientId: process.env.CLIENT_ID!,
  *   clientSecret: process.env.CLIENT_SECRET!,
  * })
- * 
+ *
  * @example
  * // ✗ Wrong: Never use in browser code
  * // This would expose your credentials!
@@ -54,8 +54,8 @@ export class TokenProvider {
     if (typeof window !== 'undefined') {
       throw new Error(
         'TokenProvider cannot be used in browser environments. ' +
-        'It requires client credentials that must never be exposed to browsers. ' +
-        'Use @chaosity/location-client-react for browser usage.'
+          'It requires client credentials that must never be exposed to browsers. ' +
+          'Use @chaosity/location-client-react for browser usage.',
       )
     }
 
@@ -65,12 +65,14 @@ export class TokenProvider {
 
   async getToken(forceRefresh = false): Promise<TokenResponse> {
     if (!forceRefresh && this.cachedToken && !this.isExpired()) {
-      const expiresIn = this.cachedExpiresAt ? Math.floor((this.cachedExpiresAt - Date.now()) / 1000) : 'unknown'
+      const expiresIn = this.cachedExpiresAt
+        ? Math.floor((this.cachedExpiresAt - Date.now()) / 1000)
+        : 'unknown'
       log('Using cached token (expires in %ds)', expiresIn)
       return {
         success: true,
         token: this.cachedToken,
-        expiresAt: this.cachedExpiresAt
+        expiresAt: this.cachedExpiresAt,
       }
     }
 
@@ -81,11 +83,15 @@ export class TokenProvider {
     }
 
     // Start new token fetch
-    const reason = forceRefresh ? 'forced refresh' : (this.cachedToken ? 'token expired' : 'no cached token')
+    const reason = forceRefresh
+      ? 'forced refresh'
+      : this.cachedToken
+        ? 'token expired'
+        : 'no cached token'
     log('Refreshing token (%s) from %s', reason, this.config.apiUrl)
-    
+
     this.tokenPromise = this.fetchToken()
-    
+
     try {
       const result = await this.tokenPromise
       return result
@@ -103,10 +109,12 @@ export class TokenProvider {
       const response = await fetch(`${apiUrl}/auth/token`, {
         method: 'POST',
         headers: {
-          'Authorization': `Basic ${credentials}`,
+          Authorization: `Basic ${credentials}`,
           'Content-Type': 'application/x-www-form-urlencoded',
         },
-        body: new URLSearchParams({ grant_type: 'client_credentials' }).toString(),
+        body: new URLSearchParams({
+          grant_type: 'client_credentials',
+        }).toString(),
       })
 
       if (!response.ok) {
@@ -114,9 +122,12 @@ export class TokenProvider {
         let errorMessage = `Token request failed: ${response.statusText}`
         try {
           const errorData = JSON.parse(errorText)
-          if (errorData.error_description) errorMessage = errorData.error_description
+          if (errorData.error_description)
+            errorMessage = errorData.error_description
           else if (errorData.error) errorMessage = errorData.error
-        } catch { /* use statusText */ }
+        } catch {
+          /* use statusText */
+        }
         throw new Error(errorMessage)
       }
 
@@ -124,9 +135,12 @@ export class TokenProvider {
       this.cachedToken = data.access_token
 
       // Prefer absolute expires_at (ms) from response, fall back to expires_in (seconds)
-      this.cachedExpiresAt = data.expires_at ?? (Date.now() + ((data.expires_in ?? 900) * 1000))
+      this.cachedExpiresAt =
+        data.expires_at ?? Date.now() + (data.expires_in ?? 900) * 1000
 
-      const expiresInSec = Math.floor((this.cachedExpiresAt! - Date.now()) / 1000)
+      const expiresInSec = Math.floor(
+        (this.cachedExpiresAt! - Date.now()) / 1000,
+      )
       log('Token acquired successfully (expires in %ds)', expiresInSec)
       return {
         success: true,
@@ -134,7 +148,10 @@ export class TokenProvider {
         expiresAt: this.cachedExpiresAt,
       }
     } catch (error) {
-      log('Token acquisition failed: %s', error instanceof Error ? error.message : 'Unknown error')
+      log(
+        'Token acquisition failed: %s',
+        error instanceof Error ? error.message : 'Unknown error',
+      )
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to get token',
@@ -144,7 +161,7 @@ export class TokenProvider {
 
   private isExpired(bufferSeconds = 60): boolean {
     if (!this.cachedExpiresAt) return true
-    return Date.now() >= (this.cachedExpiresAt - bufferSeconds * 1000)
+    return Date.now() >= this.cachedExpiresAt - bufferSeconds * 1000
   }
 
   clearCache(): void {
