@@ -9,6 +9,7 @@ import {
   SuggestCommand,
 } from '@aws-sdk/client-geo-places'
 import { ClientConfig } from '../types'
+import { LocationServiceException } from '../errors/LocationServiceException'
 import { roundPositionFields } from '../utils/roundPosition'
 
 const log = debug('location-client:api')
@@ -70,14 +71,24 @@ export class GeoPlacesClient {
       logError('Request failed: %s %s (%dms)', response.status, response.statusText, duration)
 
       let errorMessage = `API request failed: ${response.statusText}`
+      let errorCode = 'ServiceException'
+      let requestId: string | undefined
+
       try {
         const errorData = JSON.parse(errorText)
         if (errorData.message) errorMessage = errorData.message
+        if (errorData.code) errorCode = errorData.code
+        if (errorData.requestId) requestId = errorData.requestId
       } catch {
         if (errorText) errorMessage = errorText
       }
 
-      throw new Error(errorMessage)
+      throw new LocationServiceException({
+        message: errorMessage,
+        code: errorCode,
+        statusCode: response.status,
+        requestId,
+      })
     }
 
     const result = await response.json()

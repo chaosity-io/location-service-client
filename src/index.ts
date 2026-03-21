@@ -1,6 +1,10 @@
 // Client (Custom - uses our auth instead of AWS SigV4)
 export { GeoPlacesClient } from './client/GeoPlacesClient'
 
+// Errors
+export { LocationServiceException } from './errors/LocationServiceException'
+export type { LocationServiceExceptionOptions } from './errors/LocationServiceException'
+
 // Re-export AWS SDK commands and types
 export * from '@aws-sdk/client-geo-places'
 

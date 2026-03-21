@@ -1,4 +1,4 @@
-import { ClientConfig } from '../types'
+import { LocationServiceException } from '../errors/LocationServiceException'
 import {
   AutocompleteCommand,
   GeocodeCommand,
@@ -106,19 +106,25 @@ export class LocationServiceConnector {
       const errorText = await response.text()
       log('Request failed: %s %s (%dms)', response.status, response.statusText, duration)
 
-      // Try to parse error message from response
       let errorMessage = `API request failed: ${response.statusText}`
+      let errorCode = 'ServiceException'
+      let requestId: string | undefined
+
       try {
         const errorData = JSON.parse(errorText)
-        if (errorData.message) {
-          errorMessage = errorData.message
-        }
+        if (errorData.message) errorMessage = errorData.message
+        if (errorData.code) errorCode = errorData.code
+        if (errorData.requestId) requestId = errorData.requestId
       } catch {
-        // If not JSON, use raw text if available
         if (errorText) errorMessage = errorText
       }
 
-      throw new Error(errorMessage)
+      throw new LocationServiceException({
+        message: errorMessage,
+        code: errorCode,
+        statusCode: response.status,
+        requestId,
+      })
     }
 
     const result = await response.json()
