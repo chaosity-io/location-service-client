@@ -46,11 +46,12 @@ export class GeoPlacesClient {
     this.config = { serviceId: 'Geo Places' }
   }
 
-  async send<TOutput>(command: GeoPlacesCommand): Promise<TOutput> {
-    const endpoint = this.getEndpoint(command)
+  async send<TInput, TOutput>(command: TInput): Promise<TOutput> {
+    const cmd = command as unknown as GeoPlacesCommand
+    const endpoint = this.getEndpoint(cmd)
     const url = `${this.clientConfig.apiUrl}${endpoint}`
-    const commandName = command.constructor.name
-    const input = roundPositionFields(command.input)
+    const commandName = cmd.constructor.name
+    const input = roundPositionFields(cmd.input)
 
     // Prefer getToken callback (live ref) over static token string
     const token = this.clientConfig.getToken?.() ?? this.clientConfig.token

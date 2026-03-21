@@ -63,8 +63,8 @@ export class LocationServiceConnector {
     this.configPromise = config ? Promise.resolve(config) : getClientConfig()
   }
 
-  async send<TOutput>(
-    command: GeoPlacesCommand,
+  async send<TInput, TOutput>(
+    command: TInput,
     options?: SendOptions,
   ): Promise<TOutput> {
     const config = await this.configPromise
@@ -86,10 +86,11 @@ export class LocationServiceConnector {
       throw new Error('No token available')
     }
 
-    const endpoint = this.getEndpoint(command)
+    const cmd = command as unknown as GeoPlacesCommand
+    const endpoint = this.getEndpoint(cmd)
     const url = `${config.apiUrl}${endpoint}`
-    const commandName = command.constructor.name
-    const input = roundPositionFields(command.input)
+    const commandName = cmd.constructor.name
+    const input = roundPositionFields(cmd.input)
 
     log('Sending %s request to %s', commandName, endpoint)
     const startTime = Date.now()
