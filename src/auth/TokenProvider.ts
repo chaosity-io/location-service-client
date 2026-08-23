@@ -1,4 +1,6 @@
 import debug from 'debug'
+import { LocationServiceException } from '../errors/LocationServiceException'
+import { requestJson } from '../transport/http'
 
 const log = debug('location-client:auth')
 
@@ -101,12 +103,31 @@ export class TokenProvider {
     }
   }
 
+  /**
+   * Fetch a token, distinguishing transient failure from terminal (#9).
+   *
+   * This used to collapse every non-200 into `new Error(message)`: no status,
+   * no OAuth `error`, no `Retry-After`. So `503 temporarily_unavailable` — which
+   * the API returns when its config store is unreachable — was indistinguishable
+   * from `401 unauthorized`, and a customer whose credentials were perfectly
+   * good was told to go and check them.
+   *
+   * The shared transport now does the classifying: it retries 503/429/network
+   * honouring `Retry-After`, never retries 401/400, and throws a typed
+   * LocationServiceException either way. A failure REJECTS rather than resolving
+   * with `success: false`, so a stale token can never be used by accident.
+   */
   private async fetchToken(): Promise<TokenResponse> {
-    try {
-      const { clientId, clientSecret, apiUrl } = this.config
-      const credentials = btoa(`${clientId}:${clientSecret}`)
+    const { clientId, clientSecret, apiUrl } = this.config
+    const credentials = btoa(`${clientId}:${clientSecret}`)
 
-      const response = await fetch(`${apiUrl}/auth/token`, {
+    const data = await requestJson<{
+      access_token: string
+      expires_at?: number
+      expires_in?: number
+    }>(
+      `${apiUrl}/auth/token`,
+      {
         method: 'POST',
         headers: {
           Authorization: `Basic ${credentials}`,
@@ -115,47 +136,31 @@ export class TokenProvider {
         body: new URLSearchParams({
           grant_type: 'client_credentials',
         }).toString(),
+      },
+      { retry: { maxAttempts: 3 } },
+    )
+
+    if (!data.access_token) {
+      throw new LocationServiceException({
+        code: 'InvalidCredentialsException',
+        message: 'Token endpoint returned no access_token',
+        details: { source: 'client' },
       })
+    }
 
-      if (!response.ok) {
-        const errorText = await response.text()
-        let errorMessage = `Token request failed: ${response.statusText}`
-        try {
-          const errorData = JSON.parse(errorText)
-          if (errorData.error_description)
-            errorMessage = errorData.error_description
-          else if (errorData.error) errorMessage = errorData.error
-        } catch {
-          /* use statusText */
-        }
-        throw new Error(errorMessage)
-      }
+    this.cachedToken = data.access_token
+    // Prefer the absolute expires_at (ms); fall back to expires_in (seconds).
+    this.cachedExpiresAt =
+      data.expires_at ?? Date.now() + (data.expires_in ?? 900) * 1000
 
-      const data = await response.json()
-      this.cachedToken = data.access_token
-
-      // Prefer absolute expires_at (ms) from response, fall back to expires_in (seconds)
-      this.cachedExpiresAt =
-        data.expires_at ?? Date.now() + (data.expires_in ?? 900) * 1000
-
-      const expiresInSec = Math.floor(
-        (this.cachedExpiresAt! - Date.now()) / 1000,
-      )
-      log('Token acquired successfully (expires in %ds)', expiresInSec)
-      return {
-        success: true,
-        token: this.cachedToken,
-        expiresAt: this.cachedExpiresAt,
-      }
-    } catch (error) {
-      log(
-        'Token acquisition failed: %s',
-        error instanceof Error ? error.message : 'Unknown error',
-      )
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to get token',
-      }
+    log(
+      'Token acquired successfully (expires in %ds)',
+      Math.floor((this.cachedExpiresAt - Date.now()) / 1000),
+    )
+    return {
+      success: true,
+      token: this.cachedToken,
+      expiresAt: this.cachedExpiresAt,
     }
   }
 

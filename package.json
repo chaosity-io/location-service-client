@@ -21,11 +21,10 @@
     "lint": "eslint . && prettier --check .",
     "lint:fix": "eslint --fix . && prettier --write .",
     "format": "prettier --write .",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run",
     "test:watch": "vitest",
     "prepublishOnly": "npm run build",
-    "prepare": "husky",
-    "postversion": "git push --follow-tags"
+    "prepare": "husky"
   },
   "keywords": [
     "aws",

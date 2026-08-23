@@ -1,5 +1,10 @@
 // Client (Custom - uses our auth instead of AWS SigV4)
 export { GeoPlacesClient } from './client/GeoPlacesClient'
+export type { SendOptions } from './client/GeoPlacesClient'
+
+// Transport options — cancellation, per-attempt timeout, retry policy
+export { DEFAULT_MAX_ATTEMPTS, DEFAULT_TIMEOUT_MS } from './transport/http'
+export type { RequestOptions } from './transport/http'
 
 // Errors
 export { LocationServiceException } from './errors/LocationServiceException'

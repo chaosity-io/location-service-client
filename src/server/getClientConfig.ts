@@ -1,5 +1,7 @@
 import debug from 'debug'
+import { createHash } from 'node:crypto'
 import { TokenProvider } from '../auth/TokenProvider'
+import { LocationServiceException } from '../errors/LocationServiceException'
 import type { ClientConfig } from '../types'
 export interface ServerAuthConfig {
   apiUrl?: string
@@ -18,7 +20,12 @@ function getTokenProvider(
   clientId: string,
   clientSecret: string,
 ): TokenProvider {
-  const configKey = `${apiUrl}:${clientId}`
+  // The SECRET is part of the key. Without it, rotating a client secret while
+  // keeping the same clientId left this process reusing a provider built on the
+  // old secret — so the rotation appeared to do nothing until a restart. Hashed
+  // rather than concatenated so the key is never a secret in its own right, and
+  // never ends up in a log line (#5).
+  const configKey = `${apiUrl}:${clientId}:${createHash('sha256').update(clientSecret).digest('hex').slice(0, 16)}`
 
   // Reuse existing instance if config matches
   if (tokenProviderInstance && currentConfig === configKey) {
@@ -109,19 +116,39 @@ export async function getClientConfig(
   const provider = getTokenProvider(apiUrl, clientId, clientSecret)
 
   log('[getClientConfig] Fetching token')
-  const result = await provider.getToken()
+  let result
+  try {
+    result = await provider.getToken()
+  } catch (error) {
+    // The provider now rejects rather than resolving with success:false, and the
+    // rejection is typed — so a store outage (503) can be reported as a store
+    // outage instead of as bad credentials.
+    if (error instanceof LocationServiceException) {
+      if (error.isAuth) {
+        throw new LocationServiceException({
+          code: 'InvalidCredentialsException',
+          message:
+            `Authentication failed for client ID "${clientId}". ` +
+            `Verify LOCATION_CLIENT_ID and LOCATION_CLIENT_SECRET match your application in the developer portal.`,
+          statusCode: error.statusCode,
+          requestId: error.requestId,
+          cause: error,
+        })
+      }
+      throw error
+    }
+    throw error
+  }
 
-  if (!result.success || !result.token) {
-    console.error('[getClientConfig] Token fetch failed:', result.error)
-    const isAuthError =
-      result.error === 'Invalid credentials' ||
-      result.error?.toLowerCase().includes('unauthorized')
-    throw new Error(
-      isAuthError
-        ? `Authentication failed for client ID "${clientId}". ` +
-            `Verify LOCATION_CLIENT_ID and LOCATION_CLIENT_SECRET match your application in the developer portal.`
-        : result.error || 'Failed to get token',
-    )
+  // TokenProvider rejects rather than returning a tokenless success, so this is
+  // unreachable in practice — it is here to keep the contract explicit at the
+  // type level rather than asserting non-null.
+  if (!result.token) {
+    throw new LocationServiceException({
+      code: 'InvalidCredentialsException',
+      message: 'Token provider returned no token',
+      details: { source: 'client' },
+    })
   }
 
   log(
