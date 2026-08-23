@@ -1,4 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  TOKEN_REFRESH_BUFFER_SECONDS,
+  readTokenExpiry,
+} from '../src/auth/tokenRefresh'
 import { LocationServiceException } from '../src/errors/LocationServiceException'
 import { parseErrorResponse, parseRetryAfter } from '../src/transport/errors'
 import { backoffMs, requestJson } from '../src/transport/http'
@@ -202,5 +206,31 @@ describe('backoff', () => {
     expect(backoffMs(1, () => 1)).toBe(500)
     expect(backoffMs(10, () => 1)).toBe(4000) // capped
     expect(backoffMs(3, () => 0)).toBe(0) // full jitter can pick zero
+  })
+})
+
+describe('token refresh policy is one number, and expiry comes from the token', () => {
+  /**
+   * The server provider and the React provider used to carry separate `60`s —
+   * a private literal in `isExpired()` and a public prop default — with nothing
+   * tying them together. When they disagreed, the client asked for a token
+   * fresher than the server would mint, got the same one back, and asked again
+   * immediately: ~110 requests per second from an idle page on 2026-08-23.
+   */
+  it('exposes one buffer for both sides to share', () => {
+    expect(TOKEN_REFRESH_BUFFER_SECONDS).toBe(60)
+  })
+
+  it('reads the expiry out of the token rather than being told it', () => {
+    const exp = Math.floor(Date.now() / 1000) + 900
+    const token = `${btoa('{"alg":"HS256"}')}.${btoa(JSON.stringify({ exp }))}.sig`
+    expect(readTokenExpiry(token)).toBe(exp * 1000)
+  })
+
+  it('returns undefined for anything unparseable, so callers keep a fallback', () => {
+    expect(readTokenExpiry(undefined)).toBeUndefined()
+    expect(readTokenExpiry('not-a-jwt')).toBeUndefined()
+    expect(readTokenExpiry('a.b.c')).toBeUndefined()
+    expect(readTokenExpiry(`x.${btoa('{"no":"exp"}')}.y`)).toBeUndefined()
   })
 })
