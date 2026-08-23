@@ -1,14 +1,8 @@
-import {
-  AutocompleteCommand,
-  GeocodeCommand,
-  GetPlaceCommand,
-  ReverseGeocodeCommand,
-  SearchNearbyCommand,
-  SearchTextCommand,
-  SuggestCommand,
-} from '@aws-sdk/client-geo-places'
 import debug from 'debug'
 import { LocationServiceException } from '../errors/LocationServiceException'
+import { resolveEndpoint } from '../transport/endpoints'
+import type { RequestOptions } from '../transport/http'
+import { requestJson } from '../transport/http'
 import type { GeoPlacesCommand } from '../types'
 import { roundPositionFields } from '../utils/roundPosition'
 import type { ServerClientConfig } from './getClientConfig'
@@ -20,47 +14,39 @@ export interface ConnectorConfig {
   apiUrl?: string
   token?: string
   getToken?: () => Promise<{ token: string }>
+  /**
+   * Sent as the `Origin` header on every request. The API requires an Origin it
+   * recognises on every data request and answers 403 without one, so every
+   * caller was setting it by hand on each `send`; this does it once.
+   */
+  origin?: string
 }
 
-export interface SendOptions {
+export interface SendOptions extends RequestOptions {
   headers?: Record<string, string>
 }
 
 /**
- * LocationServiceConnector - Server-side connector for Location Service API
+ * LocationServiceConnector — server-side connector for the Location Service API.
  *
- * Optimized for backend-to-backend communication with:
- * - Automatic configuration from environment variables
- * - Automatic Origin header handling
- * - Server-side token management
- * - Enhanced error handling
- *
- * Uses AWS SDK command classes with Bearer token authentication.
+ * Backend-to-backend: automatic configuration from the environment, server-side
+ * token management, and the same transport (timeout, cancellation, retry) as the
+ * browser client.
  *
  * @example
  * ```typescript
- * // Auto-detect from environment
- * const connector = new LocationServiceConnector()
- *
- * // Or provide explicit config
- * const connector = new LocationServiceConnector({
- *   apiUrl: 'https://api.example.com',
- *   token: 'your-token'
- * })
- *
- * // Send with custom headers (including Origin)
- * const result = await connector.send(
- *   new SearchTextCommand({ QueryText: 'Space Needle' }),
- *   { headers: { 'Origin': req.headers.origin } }
- * )
+ * const connector = new LocationServiceConnector({ origin: 'https://app.example.com' })
+ * const result = await connector.send(new SearchTextCommand({ QueryText: 'Space Needle' }))
  * ```
  */
 export class LocationServiceConnector {
   private configPromise: Promise<ServerClientConfig | ConnectorConfig>
+  private origin?: string
   public readonly serviceId: string = 'Geo Places'
 
   constructor(config?: ConnectorConfig) {
     this.configPromise = config ? Promise.resolve(config) : getClientConfig()
+    this.origin = config?.origin
   }
 
   async send<TInput, TOutput>(
@@ -69,7 +55,6 @@ export class LocationServiceConnector {
   ): Promise<TOutput> {
     const config = await this.configPromise
 
-    // Get token - ConnectorConfig may have getToken, ServerClientConfig has static token
     let token: string | undefined
     if ('getToken' in config && typeof config.getToken === 'function') {
       const result = await config.getToken()
@@ -83,79 +68,32 @@ export class LocationServiceConnector {
     }
 
     if (!token) {
-      throw new Error('No token available')
+      throw new LocationServiceException({
+        code: 'InvalidCredentialsException',
+        message:
+          'No token available — check clientId/clientSecret configuration',
+        details: { source: 'client' },
+      })
     }
 
     const cmd = command as unknown as GeoPlacesCommand
-    const endpoint = this.getEndpoint(cmd)
-    const url = `${config.apiUrl}${endpoint}`
-    const commandName = cmd.constructor.name
+    const endpoint = resolveEndpoint(cmd)
     const input = roundPositionFields(cmd.input)
 
-    log('Sending %s request to %s', commandName, endpoint)
-    const startTime = Date.now()
-
-    // Merge headers: user headers, then system headers override
+    // Caller headers first so the system ones below cannot be overridden, but an
+    // explicit per-call Origin still beats the connector-wide default.
     const headers: Record<string, string> = {
-      ...(options?.headers || {}),
+      ...(this.origin ? { Origin: this.origin } : {}),
+      ...(options?.headers ?? {}),
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     }
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(input),
-    })
-
-    const duration = Date.now() - startTime
-
-    if (!response.ok) {
-      const errorText = await response.text()
-      log(
-        'Request failed: %s %s (%dms)',
-        response.status,
-        response.statusText,
-        duration,
-      )
-
-      let errorMessage = `API request failed: ${response.statusText}`
-      let errorCode = 'ServiceException'
-      let requestId: string | undefined
-
-      try {
-        const errorData = JSON.parse(errorText)
-        if (errorData.message) errorMessage = errorData.message
-        if (errorData.code) errorCode = errorData.code
-        if (errorData.requestId) requestId = errorData.requestId
-      } catch {
-        if (errorText) errorMessage = errorText
-      }
-
-      throw new LocationServiceException({
-        message: errorMessage,
-        code: errorCode,
-        statusCode: response.status,
-        requestId,
-      })
-    }
-
-    const result = await response.json()
-    log('Request successful: %s (%dms)', response.status, duration)
-    return result
-  }
-
-  private getEndpoint(command: GeoPlacesCommand): string {
-    if (command instanceof AutocompleteCommand) return '/address/autocomplete'
-    if (command instanceof GeocodeCommand) return '/address/geocode'
-    if (command instanceof GetPlaceCommand) return '/address/place'
-    if (command instanceof ReverseGeocodeCommand)
-      return '/address/search/reverse-geocode'
-    if (command instanceof SearchNearbyCommand) return '/address/search/nearby'
-    if (command instanceof SearchTextCommand) return '/address/search/text'
-    if (command instanceof SuggestCommand) return '/address/suggestion'
-    throw new Error(
-      `Unknown command type: ${command.constructor?.name ?? typeof command}`,
+    log('Sending %s request to %s', cmd.constructor?.name, endpoint)
+    return requestJson<TOutput>(
+      `${config.apiUrl}${endpoint}`,
+      { method: 'POST', headers, body: JSON.stringify(input) },
+      options,
     )
   }
 }
