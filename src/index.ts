@@ -6,6 +6,12 @@ export type { SendOptions } from './client/GeoPlacesClient'
 export { DEFAULT_MAX_ATTEMPTS, DEFAULT_TIMEOUT_MS } from './transport/http'
 export type { RequestOptions } from './transport/http'
 
+// Token refresh policy — shared by the server provider and the React provider
+export {
+  TOKEN_REFRESH_BUFFER_SECONDS,
+  readTokenExpiry,
+} from './auth/tokenRefresh'
+
 // Errors
 export { LocationServiceException } from './errors/LocationServiceException'
 export type { LocationServiceExceptionOptions } from './errors/LocationServiceException'

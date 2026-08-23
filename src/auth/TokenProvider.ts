@@ -1,6 +1,7 @@
 import debug from 'debug'
 import { LocationServiceException } from '../errors/LocationServiceException'
 import { requestJson } from '../transport/http'
+import { TOKEN_REFRESH_BUFFER_SECONDS, readTokenExpiry } from './tokenRefresh'
 
 const log = debug('location-client:auth')
 
@@ -149,9 +150,13 @@ export class TokenProvider {
     }
 
     this.cachedToken = data.access_token
-    // Prefer the absolute expires_at (ms); fall back to expires_in (seconds).
+    // The token's own `exp` claim first — it is the only value that cannot
+    // disagree with what the API will actually accept. `expires_at` and
+    // `expires_in` are what the response CLAIMS, and are kept as fallbacks.
     this.cachedExpiresAt =
-      data.expires_at ?? Date.now() + (data.expires_in ?? 900) * 1000
+      readTokenExpiry(data.access_token) ??
+      data.expires_at ??
+      Date.now() + (data.expires_in ?? 900) * 1000
 
     log(
       'Token acquired successfully (expires in %ds)',
@@ -164,7 +169,7 @@ export class TokenProvider {
     }
   }
 
-  private isExpired(bufferSeconds = 60): boolean {
+  private isExpired(bufferSeconds = TOKEN_REFRESH_BUFFER_SECONDS): boolean {
     if (!this.cachedExpiresAt) return true
     return Date.now() >= this.cachedExpiresAt - bufferSeconds * 1000
   }
