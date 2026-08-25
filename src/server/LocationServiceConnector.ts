@@ -5,6 +5,8 @@ import type { RequestOptions } from '../transport/http'
 import { requestJson } from '../transport/http'
 import type { GeoPlacesCommand } from '../types'
 import { roundPositionFields } from '../utils/roundPosition'
+import type { AppConfigClaims } from '../utils/tokenClaims'
+import { readAppConfigClaims } from '../utils/tokenClaims'
 import type { ServerClientConfig } from './getClientConfig'
 import { getClientConfig } from './getClientConfig'
 
@@ -49,23 +51,40 @@ export class LocationServiceConnector {
     this.origin = config?.origin
   }
 
+  /** One place that knows how a token is obtained, so nothing can drift. */
+  private async resolveToken(): Promise<string | undefined> {
+    const config = await this.configPromise
+    if ('getToken' in config && typeof config.getToken === 'function') {
+      const result = await config.getToken()
+      if (!result) return undefined
+      return typeof result === 'string' ? result : result.token
+    }
+    return (config as ConnectorConfig).token
+  }
+
+  /**
+   * This application's own configuration, as carried on the access token
+   * (api#65) — bias precision, and the countries it is scoped to.
+   *
+   * Provided so an application can SHOW its own settings: populate a country
+   * selector with the markets it actually serves, label a settings screen, and
+   * so on. Being a few minutes stale is cosmetic for that.
+   *
+   * It is not an entitlement check. See AppConfigClaims for why acting on
+   * `countries` client-side makes requests fail that would otherwise succeed.
+   *
+   * Returns `{}` when the token carries no application config, which is the
+   * case until one is configured in the portal.
+   */
+  async getAppConfig(): Promise<AppConfigClaims> {
+    return readAppConfigClaims(await this.resolveToken())
+  }
+
   async send<TInput, TOutput>(
     command: TInput,
     options?: SendOptions,
   ): Promise<TOutput> {
-    const config = await this.configPromise
-
-    let token: string | undefined
-    if ('getToken' in config && typeof config.getToken === 'function') {
-      const result = await config.getToken()
-      token = result
-        ? typeof result === 'string'
-          ? result
-          : result.token
-        : undefined
-    } else {
-      token = (config as ConnectorConfig).token
-    }
+    const token = await this.resolveToken()
 
     if (!token) {
       throw new LocationServiceException({
@@ -78,7 +97,13 @@ export class LocationServiceConnector {
 
     const cmd = command as unknown as GeoPlacesCommand
     const endpoint = resolveEndpoint(cmd)
-    const input = roundPositionFields(cmd.input)
+
+    // The token is already resolved above, so the precision this application
+    // is entitled to is available before the request is shaped (api#65).
+    // Absent claim -> the 3 dp floor, which is what every application gets
+    // until one is configured otherwise.
+    const { biasDecimals } = readAppConfigClaims(token)
+    const input = roundPositionFields(cmd.input, biasDecimals)
 
     // Caller headers first so the system ones below cannot be overridden, but an
     // explicit per-call Origin still beats the connector-wide default.
@@ -91,7 +116,7 @@ export class LocationServiceConnector {
 
     log('Sending %s request to %s', cmd.constructor?.name, endpoint)
     return requestJson<TOutput>(
-      `${config.apiUrl}${endpoint}`,
+      `${(await this.configPromise).apiUrl}${endpoint}`,
       { method: 'POST', headers, body: JSON.stringify(input) },
       options,
     )

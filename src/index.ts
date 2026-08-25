@@ -24,6 +24,10 @@ export * from '@aws/amazon-location-utilities-datatypes'
 
 // Adapters (Custom - for MapLibre integration)
 export { GeoPlaces } from './adapters/GeoPlaces'
+export type {
+  GeoPlacesDetailOptions,
+  GeoPlacesOptions,
+} from './adapters/GeoPlaces'
 
 // Maps utilities
 export { createTransformRequest } from './maps/createTransformRequest'
@@ -40,5 +44,6 @@ export { transformRequest } from './maps/Utils'
 
 // Custom Types
 export type { ClientConfig, GeoPlacesCommand, MapLike } from './types'
+export type { AppConfigClaims } from './utils/tokenClaims'
 
 // Server-only utilities are available via '@chaosity/location-client/server'
