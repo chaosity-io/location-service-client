@@ -7,7 +7,6 @@ import {
   type GetPlaceResponse,
   ReverseGeocodeCommand,
   type ReverseGeocodeResponse,
-  SuggestAdditionalFeature,
   SuggestCommand,
   type SuggestResponse,
 } from '@aws-sdk/client-geo-places'
@@ -35,13 +34,75 @@ const log = debug('location-client:geocoder')
  *
  * Implements MaplibreGeocoderApi interface for compatibility with @maplibre/maplibre-gl-geocoder
  */
+/**
+ * Extra GetPlace detail, and what each one costs (#3 / T19).
+ *
+ * Measured against Amazon Location on 2026-08-25 by requesting each feature
+ * alone and reading the pricing bucket back:
+ *
+ *   (none)              -> Core      $0.50/1k
+ *   SecondaryAddresses  -> Core      $0.50/1k
+ *   Access              -> Advanced  $1.50/1k
+ *   TimeZone            -> Advanced  $1.50/1k
+ *   Contact             -> Advanced  $1.50/1k
+ *
+ * `secondaryAddresses` is therefore free in bucket terms and the others triple
+ * the price of every lookup. They are opt-in for that reason, not because the
+ * data is unwelcome.
+ *
+ * Worth knowing before enabling `contact`: for a street address it costs
+ * Advanced and returns no contact field at all — only points of interest carry
+ * one. On an address-completion flow that is 3x the price for nothing.
+ */
+export interface GeoPlacesDetailOptions {
+  /** Entrance/exit points. Moves the request to the Advanced bucket. */
+  access?: boolean
+  /** Unit and sub-address detail. Stays in the Core bucket — free to enable. */
+  secondaryAddresses?: boolean
+  /** Phone/website, POIs only. Moves the request to the Advanced bucket. */
+  contact?: boolean
+  /** IANA zone and offset. Moves the request to the Advanced bucket. */
+  timeZone?: boolean
+}
+
+export interface GeoPlacesOptions {
+  /**
+   * Extra detail on `searchByPlaceId`. Default: none, which keeps every
+   * lookup in the Core bucket.
+   */
+  details?: GeoPlacesDetailOptions
+}
+
 export class GeoPlaces implements MaplibreGeocoderApi {
   private client: GeoPlacesClient
   private map: Map
+  private details: GeoPlacesDetailOptions
 
-  constructor(client: GeoPlacesClient, map: Map) {
+  constructor(
+    client: GeoPlacesClient,
+    map: Map,
+    options: GeoPlacesOptions = {},
+  ) {
     this.client = client
     this.map = map
+    this.details = options.details ?? {}
+  }
+
+  /**
+   * Build the AdditionalFeatures list from the opt-ins, or omit it entirely.
+   *
+   * Returning `undefined` rather than `[]` matters: an empty array is still a
+   * field on the request, and the point is to send nothing.
+   */
+  private detailFeatures(): GetPlaceAdditionalFeature[] | undefined {
+    const features: GetPlaceAdditionalFeature[] = []
+    if (this.details.access) features.push(GetPlaceAdditionalFeature.ACCESS)
+    if (this.details.secondaryAddresses)
+      features.push(GetPlaceAdditionalFeature.SECONDARY_ADDRESSES)
+    if (this.details.contact) features.push(GetPlaceAdditionalFeature.CONTACT)
+    if (this.details.timeZone)
+      features.push(GetPlaceAdditionalFeature.TIME_ZONE)
+    return features.length ? features : undefined
   }
 
   private normalizeLanguage(language?: string | string[]): string {
@@ -128,7 +189,18 @@ export class GeoPlaces implements MaplibreGeocoderApi {
       BiasPosition: biasPosition,
       MaxResults: config.limit || 5,
       Language: this.normalizeLanguage(config.language),
-      AdditionalFeatures: [SuggestAdditionalFeature.CORE],
+      // No AdditionalFeatures (#3 / T19).
+      //
+      // This used to send `[Core]`, which put every keystroke in the Core
+      // bucket at $0.50/1k. The only thing Core adds to a Suggest response is
+      // `Highlights`, and this adapter reads `Title` and `Place.PlaceId` —
+      // nothing else. Verified against Amazon Location on 2026-08-25:
+      //
+      //   with [Core] -> bucket Core   keys: Title, ..., Place, Highlights
+      //   without     -> bucket Label  keys: Title, ..., Place
+      //
+      // Same two fields, $0.20/1k instead of $0.50. Suggest fires per
+      // keystroke, so it is the highest-volume call the library makes.
       ...(config.countries || config.bbox
         ? {
             Filter: {
@@ -169,15 +241,14 @@ export class GeoPlaces implements MaplibreGeocoderApi {
   ): Promise<MaplibreGeocoderPlaceResults> {
     log('searchByPlaceId placeId=%s', config.query)
 
+    // Opt-in rather than always-on (#3 / T19). Requesting all four put every
+    // lookup in the Advanced bucket at $1.50/1k; the default now sends none
+    // and stays in Core at $0.50. Callers that want the detail ask for it.
+    const additionalFeatures = this.detailFeatures()
     const command = new GetPlaceCommand({
       PlaceId: config.query as string,
       Language: this.normalizeLanguage(config.language),
-      AdditionalFeatures: [
-        GetPlaceAdditionalFeature.ACCESS,
-        GetPlaceAdditionalFeature.SECONDARY_ADDRESSES,
-        GetPlaceAdditionalFeature.CONTACT,
-        GetPlaceAdditionalFeature.TIME_ZONE,
-      ],
+      ...(additionalFeatures ? { AdditionalFeatures: additionalFeatures } : {}),
     })
 
     const response = (await this.client.send(command)) as GetPlaceResponse
