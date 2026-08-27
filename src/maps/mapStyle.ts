@@ -1,24 +1,51 @@
 import type { StyleSpecification } from 'maplibre-gl'
+import type {
+  Buildings,
+  ColorScheme,
+  ContourDensity,
+  MapStyle,
+  Terrain,
+  TrafficMode,
+  TravelMode,
+} from './mapEnums'
 
 /**
  * Options for building an AWS Location Service map style URL.
  * All parameters map directly to query parameters supported by the style descriptor endpoint.
+ *
+ * Values are CASE SENSITIVE — the API rejects a wrong-cased one with a 400 that
+ * names the right spelling. Import the arrays from `mapEnums` to build pickers
+ * rather than typing the values, and the case is right by construction.
  */
 export interface MapStyleOptions {
   /** Color scheme for the map (default: Light). Not applicable to Satellite/Hybrid styles. */
-  colorScheme?: 'Light' | 'Dark'
+  colorScheme?: ColorScheme
   /** ISO 3166-1 alpha-3 country code for political boundary perspective (e.g. 'IND', 'TUR'). */
   politicalView?: string
   /** Terrain overlay type. */
-  terrain?: 'Hillshade' | 'Terrain3D'
+  terrain?: Terrain
   /** Enable 3D building extrusions. */
-  buildings?: 'Buildings3D'
-  /** Elevation contour line density. Only 'Medium' is currently supported by the AWS SDK. */
-  contourDensity?: 'Medium'
-  /** Enable real-time traffic flow visualization. */
-  traffic?: 'All'
+  buildings?: Buildings
+  /**
+   * Elevation contour line density.
+   *
+   * All of High, Low and Medium work. This was previously typed as `'Medium'`
+   * alone, documented as "the only value currently supported by the AWS SDK",
+   * which was wrong — the other two were confirmed against the live API.
+   */
+  contourDensity?: ContourDensity
+  /**
+   * Traffic overlay.
+   *
+   * `Congestion` was previously missing here, so it could not be requested from
+   * TypeScript even though the API accepts it.
+   *
+   * Valid on its own, but NOT with every style: `Satellite` + `All` answers
+   * 400 "Traffic is not supported for style." Amazon owns that rule.
+   */
+  traffic?: TrafficMode
   /** Travel mode overlays for routing-specific features. */
-  travelModes?: Array<'Truck' | 'Transit'>
+  travelModes?: TravelMode[]
 }
 
 /**
@@ -35,7 +62,7 @@ export interface MapStyleOptions {
  */
 export function buildMapStyleUrl(
   apiUrl: string,
-  mapStyle: string,
+  mapStyle: MapStyle,
   options: MapStyleOptions = {},
 ): string {
   const params = new URLSearchParams()
@@ -77,7 +104,7 @@ export function buildMapStyleUrl(
  */
 export async function fetchMapStyle(
   apiUrl: string,
-  mapStyle: string,
+  mapStyle: MapStyle,
   getToken: () => string | undefined,
   options: MapStyleOptions & { language?: string } = {},
 ): Promise<StyleSpecification> {

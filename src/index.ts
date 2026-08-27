@@ -40,6 +40,37 @@ export {
 export type { PoiCategory } from './maps/mapPoi'
 export { buildMapStyleUrl, fetchMapStyle } from './maps/mapStyle'
 export type { MapStyleOptions } from './maps/mapStyle'
+
+// Accepted values for every map parameter, as VALUES so a picker can be built
+// from them, plus the matching types. Case sensitive — see mapEnums.ts.
+export {
+  BUILDINGS,
+  COLOR_SCHEMES,
+  CONTOUR_DENSITIES,
+  LABEL_SIZES,
+  MAP_FEATURE_MODES,
+  MAP_STYLES,
+  SCALE_BAR_UNITS,
+  SPRITE_VARIANTS,
+  STATIC_MAP_STYLES,
+  TERRAINS,
+  TRAFFIC_MODES,
+  TRAVEL_MODES,
+} from './maps/mapEnums'
+export type {
+  Buildings,
+  ColorScheme,
+  ContourDensity,
+  LabelSize,
+  MapFeatureMode,
+  MapStyle,
+  ScaleBarUnit,
+  SpriteVariant,
+  StaticMapStyle,
+  Terrain,
+  TrafficMode,
+  TravelMode,
+} from './maps/mapEnums'
 export { transformRequest } from './maps/Utils'
 
 // Custom Types
