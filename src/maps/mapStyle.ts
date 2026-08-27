@@ -1,4 +1,6 @@
 import type { StyleSpecification } from 'maplibre-gl'
+
+import { parseErrorResponse } from '../transport/errors'
 import type {
   Buildings,
   ColorScheme,
@@ -120,8 +122,23 @@ export async function fetchMapStyle(
   })
 
   if (!response.ok) {
-    throw new Error(
-      `Failed to fetch map style: ${response.status} ${response.statusText}`,
+    // Read the body. The API sends `{message, code, requestId}` and the message
+    // is the whole point of it — for a style request it is Amazon's own
+    // sentence, forwarded verbatim by location-service-api#89:
+    //
+    //   400 "Traffic is not supported for style."
+    //   400 "light is not a supported color scheme for style Standard."
+    //
+    // This used to throw `Failed to fetch map style: 400`, discarding all of it
+    // two lines before anyone could read it — the same defect #89 fixed in the
+    // API, one layer up. Reuses parseErrorResponse so a style failure arrives as
+    // the same LocationServiceException as every other call in this package,
+    // with `code`, `statusCode` and `requestId` intact.
+    throw parseErrorResponse(
+      response.status,
+      response.statusText,
+      await response.text(),
+      response.headers,
     )
   }
 

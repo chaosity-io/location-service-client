@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { LocationServiceException } from '../src/errors/LocationServiceException'
 import { createTransformRequest } from '../src/maps/createTransformRequest'
 import { applyMapLanguage } from '../src/maps/mapLanguage'
 import {
@@ -158,12 +159,24 @@ describe('fetchMapStyle', () => {
     expect(init.headers.Accept).toBe('application/json')
   })
 
-  it('throws with the status when the API refuses', async () => {
+  it('carries the status when the API refuses', async () => {
+    // The status used to be asserted through the MESSAGE, because the message
+    // was built from the status and nothing else. It is structural now: the
+    // message carries what the server actually said, which for our error
+    // envelope is Amazon's own sentence (see map-style-errors.test.ts).
     fetchMock.mockImplementation(
       async () =>
         new Response('nope', { status: 403, statusText: 'Forbidden' }),
     )
-    await expect(fetchMapStyle(API, 'Standard', token)).rejects.toThrow(/403/)
+
+    const err = await fetchMapStyle(API, 'Standard', token).catch(
+      (e: unknown) => e as LocationServiceException,
+    )
+    expect(err).toBeInstanceOf(LocationServiceException)
+    expect(err.statusCode).toBe(403)
+    // A non-JSON body is echoed rather than discarded — it is what the server
+    // chose to say.
+    expect(err.message).toContain('nope')
   })
 
   it('rewrites text-field on symbol layers for the requested language', async () => {
