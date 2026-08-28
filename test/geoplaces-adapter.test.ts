@@ -124,3 +124,113 @@ describe('GetPlace detail is opt-in, so the default stays in Core', () => {
     expect(lastInput().AdditionalFeatures).toBeUndefined()
   })
 })
+
+/**
+ * The control is a Carmen-shaped consumer. Its result list renders
+ * `item.place_name.split(',')`, the input takes `place_name` on select, and
+ * fly-to reads `center` / `bbox`. The AWS converters emit plain GeoJSON, so a
+ * forward geocode used to return features with NO `place_name` — the list
+ * renderer threw, the control emitted `error` with nobody listening, and the
+ * Enter key silently did nothing (`Unhandled error. (undefined)` in the
+ * console). Found by driving the testbed, not by a test — which is why these
+ * exist. Suggestions never broke, because that path renders `text`.
+ */
+describe('results carry what the geocoder control renders', () => {
+  // The shape Amazon returns for "Circular Quay" with an AU filter, trimmed.
+  const item = (over: Record<string, unknown> = {}) => ({
+    PlaceId: 'AQAA-1',
+    PlaceType: 'Street',
+    Title: 'Circular Quay, Sydney NSW 2000, Australia',
+    Address: {
+      Label: 'Circular Quay, Sydney NSW 2000, Australia',
+      Country: { Code2: 'AU', Code3: 'AUS', Name: 'Australia' },
+      Locality: 'Sydney',
+    },
+    Position: [151.21284, -33.85985],
+    MapView: [151.2117, -33.8611, 151.2141, -33.8586],
+    Distance: 1500,
+    ...over,
+  })
+
+  const clientReturning = (response: unknown) =>
+    ({ send: async () => response }) as unknown as GeoPlacesClient
+
+  it('forward geocode: place_name, text, place_type, center and bbox are present', async () => {
+    const gp = new GeoPlaces(
+      clientReturning({ ResultItems: [item()] }),
+      fakeMap as never,
+    )
+    const { features } = await gp.forwardGeocode({
+      query: 'Circular Quay',
+    } as never)
+
+    expect(features).toHaveLength(1)
+    const f = features[0]!
+    expect(f.place_name).toBe('Circular Quay, Sydney NSW 2000, Australia')
+    expect(f.text).toBe('Circular Quay, Sydney NSW 2000, Australia')
+    expect(f.place_type).toEqual(['Street'])
+    expect(f.center).toEqual([151.21284, -33.85985])
+    expect(f.bbox).toEqual([151.2117, -33.8611, 151.2141, -33.8586])
+    // Still a valid GeoJSON feature underneath.
+    expect(f.geometry).toEqual({
+      type: 'Point',
+      coordinates: [151.21284, -33.85985],
+    })
+  })
+
+  it('survives what the list renderer does to it', async () => {
+    // This is the exact expression that threw.
+    const gp = new GeoPlaces(
+      clientReturning({ ResultItems: [item()] }),
+      fakeMap as never,
+    )
+    const { features } = await gp.forwardGeocode({ query: 'x' } as never)
+    expect(() => features[0]!.place_name.split(',')).not.toThrow()
+  })
+
+  it('falls back to Title when there is no address label', async () => {
+    const gp = new GeoPlaces(
+      clientReturning({
+        ResultItems: [item({ Address: { Country: { Code2: 'AU' } } })],
+      }),
+      fakeMap as never,
+    )
+    const { features } = await gp.forwardGeocode({ query: 'x' } as never)
+    expect(features[0]!.place_name).toBe(
+      'Circular Quay, Sydney NSW 2000, Australia',
+    )
+  })
+
+  it('omits bbox when Amazon sends no MapView, rather than inventing one', async () => {
+    const gp = new GeoPlaces(
+      clientReturning({ ResultItems: [item({ MapView: undefined })] }),
+      fakeMap as never,
+    )
+    const { features } = await gp.forwardGeocode({ query: 'x' } as never)
+    expect(features[0]).not.toHaveProperty('bbox')
+    expect(features[0]!.center).toEqual([151.21284, -33.85985])
+  })
+
+  it('reverse geocode gets the same treatment', async () => {
+    const gp = new GeoPlaces(
+      clientReturning({ ResultItems: [item()] }),
+      fakeMap as never,
+    )
+    const { features } = await gp.reverseGeocode({
+      query: [151.2093, -33.8688],
+    } as never)
+    expect(features[0]!.place_name).toBe(
+      'Circular Quay, Sydney NSW 2000, Australia',
+    )
+    expect(features[0]!.place_type).toEqual(['Street'])
+  })
+
+  it('an empty result is an empty collection, not a crash', async () => {
+    const gp = new GeoPlaces(
+      clientReturning({ ResultItems: [] }),
+      fakeMap as never,
+    )
+    const result = await gp.forwardGeocode({ query: 'zzz' } as never)
+    expect(result).toEqual({ type: 'FeatureCollection', features: [] })
+  })
+})

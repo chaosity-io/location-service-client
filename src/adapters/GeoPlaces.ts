@@ -73,6 +73,57 @@ export interface GeoPlacesOptions {
   details?: GeoPlacesDetailOptions
 }
 
+type ConvertedFeature = ReturnType<
+  typeof geocodeResponseToFeatureCollection
+>['features'][number]
+
+/**
+ * Give the control the fields it renders, not just the ones GeoJSON needs.
+ *
+ * `@maplibre/maplibre-gl-geocoder` is a Carmen-shaped consumer: its result list
+ * calls `item.place_name.split(',')`, the input takes `result.place_name` on
+ * select, and fly-to reads `center` / `bbox`. The AWS converters produce plain
+ * GeoJSON — `properties` and `geometry` only — so a forward geocode used to
+ * hand the control features with no `place_name`. The list renderer threw, the
+ * control caught it and emitted `error`, and with no listener that surfaced as
+ * `Unhandled error. (undefined)` in the console: the Enter key silently did
+ * nothing. Suggestions were unaffected because that path renders `text`.
+ *
+ * The `as MaplibreGeocoderFeatureResults` cast this replaces is what hid it —
+ * `place_name` and `text` are required on the type.
+ */
+function toCarmenFeatures(
+  features: ConvertedFeature[],
+): CarmenGeojsonFeature[] {
+  return features.map((feature) => {
+    const p = (feature.properties ?? {}) as Record<string, unknown>
+    const title = typeof p.Title === 'string' ? p.Title : ''
+    const label =
+      typeof p['Address.Label'] === 'string' ? p['Address.Label'] : ''
+    // `flattenProperties` flattens nested OBJECTS (Address.Label) but leaves an
+    // array of numbers intact, so MapView is still [minx, miny, maxx, maxy].
+    const view = p.MapView
+    const bbox =
+      Array.isArray(view) &&
+      view.length === 4 &&
+      view.every((v) => typeof v === 'number')
+        ? (view as [number, number, number, number])
+        : undefined
+    const center =
+      feature.geometry?.type === 'Point'
+        ? (feature.geometry.coordinates as [number, number])
+        : undefined
+    return {
+      ...feature,
+      text: title || label,
+      place_name: label || title,
+      place_type: typeof p.PlaceType === 'string' ? [p.PlaceType] : [],
+      ...(bbox ? { bbox } : {}),
+      ...(center ? { center } : {}),
+    } as CarmenGeojsonFeature
+  })
+}
+
 export class GeoPlaces implements MaplibreGeocoderApi {
   private client: GeoPlacesClient
   private map: Map
@@ -140,10 +191,14 @@ export class GeoPlaces implements MaplibreGeocoderApi {
     const response = (await this.client.send(
       new GeocodeCommand(commandInput),
     )) as GeocodeResponse
-    const result = geocodeResponseToFeatureCollection(response, {
+    const converted = geocodeResponseToFeatureCollection(response, {
       flattenProperties: true,
-    }) as MaplibreGeocoderFeatureResults
-    log('forwardGeocode returned %d results', result.features?.length ?? 0)
+    })
+    const result: MaplibreGeocoderFeatureResults = {
+      type: 'FeatureCollection',
+      features: toCarmenFeatures(converted.features),
+    }
+    log('forwardGeocode returned %d results', result.features.length)
     return result
   }
 
@@ -166,10 +221,14 @@ export class GeoPlaces implements MaplibreGeocoderApi {
     const response = (await this.client.send(
       new ReverseGeocodeCommand(commandInput),
     )) as ReverseGeocodeResponse
-    const result = reverseGeocodeResponseToFeatureCollection(response, {
+    const converted = reverseGeocodeResponseToFeatureCollection(response, {
       flattenProperties: true,
-    }) as MaplibreGeocoderFeatureResults
-    log('reverseGeocode returned %d results', result.features?.length ?? 0)
+    })
+    const result: MaplibreGeocoderFeatureResults = {
+      type: 'FeatureCollection',
+      features: toCarmenFeatures(converted.features),
+    }
+    log('reverseGeocode returned %d results', result.features.length)
     return result
   }
 
