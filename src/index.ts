@@ -40,6 +40,12 @@ export {
 export type { PoiCategory } from './maps/mapPoi'
 export { buildMapStyleUrl, fetchMapStyle } from './maps/mapStyle'
 export type { MapStyleOptions } from './maps/mapStyle'
+export {
+  buildStaticMapUrl,
+  fetchStaticMap,
+  staticMapAccept,
+} from './maps/staticMap'
+export type { StaticMapFileName, StaticMapOptions } from './maps/staticMap'
 
 // Accepted values for every map parameter, as VALUES so a picker can be built
 // from them, plus the matching types. Case sensitive — see mapEnums.ts.
