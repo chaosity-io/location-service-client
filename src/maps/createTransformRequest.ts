@@ -12,7 +12,7 @@ export function createTransformRequest(
   apiUrl: string,
   getToken: () => string | undefined,
 ): RequestTransformFunction {
-  return (url: string, resourceType?: string) => {
+  return (url: string, _resourceType?: string) => {
     if (url.startsWith(apiUrl)) {
       const token = getToken()
       if (!token) {
