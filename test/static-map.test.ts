@@ -69,6 +69,45 @@ describe('buildStaticMapUrl', () => {
     expect(url.searchParams.get('center')).toBe('151.2093,-33.8688')
   })
 
+  it('rounds a raw map centre so it never exceeds the API decimal cap (#29)', () => {
+    // Straight from map.getCenter(): 15 decimals. The API's POSITION rule
+    // allows 14, so this used to be
+    //   400 "'center' must be "longitude,latitude" ... got '172.515,-40.824218738262104'"
+    // — a precision cap reported as a format error, on the most obvious
+    // integration there is.
+    const url = new URL(
+      buildStaticMapUrl(API, {
+        ...base,
+        center: [172.515, -40.824218738262104],
+      }),
+    )
+    expect(url.searchParams.get('center')).toBe('172.515,-40.824219')
+
+    const bb = new URL(
+      buildStaticMapUrl(API, {
+        ...base,
+        boundingBox: [1.00000049999, 2.1234567891234, 3, 4.9999996],
+      }),
+    )
+    expect(bb.searchParams.get('bounding-box')).toBe('1,2.123457,3,5')
+
+    const bp = new URL(
+      buildStaticMapUrl(API, {
+        ...base,
+        boundedPositions: [[151.2093000001, -33.8688000000004]],
+      }),
+    )
+    expect(bp.searchParams.get('bounded-positions')).toBe('151.2093,-33.8688')
+
+    for (const value of [url, bb, bp].flatMap((u) => [
+      ...u.searchParams.values(),
+    ])) {
+      for (const n of value.split(',')) {
+        expect((n.split('.')[1] ?? '').length).toBeLessThanOrEqual(6)
+      }
+    }
+  })
+
   it('serialises boundingBox and bounded positions flat, in kebab-case', () => {
     const bb = new URL(
       buildStaticMapUrl(API, { ...base, boundingBox: [1, 2, 3, 4] }),

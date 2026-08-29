@@ -85,6 +85,9 @@ export function staticMapAccept(style?: StaticMapStyle): string {
   return style === 'Standard' ? 'image/png' : 'image/jpeg'
 }
 
+/** A coordinate as the API accepts it: at most six decimals, no float noise. */
+const coord = (n: number): string => String(Number(n.toFixed(6)))
+
 /** Build the request URL without fetching it. */
 export function buildStaticMapUrl(
   apiUrl: string,
@@ -108,10 +111,19 @@ export function buildStaticMapUrl(
   // Positions go over the wire as comma-separated numbers. api#35 records that
   // passing arrays straight through worked only by accidental stringification;
   // doing it explicitly here means the shape is ours, not JavaScript's default.
-  if (center) params.set('center', center.join(','))
-  if (boundingBox) params.set('bounding-box', boundingBox.join(','))
+  //
+  // Each number is rounded to six decimals (#29). The API caps a coordinate at
+  // fourteen decimals, and a value straight from `map.getCenter()` routinely
+  // has fifteen or sixteen — so the obvious "render what the user is looking
+  // at" was a 400 blaming the FORMAT. Six decimals is ~10 cm, more than a
+  // raster render can show.
+  if (center) params.set('center', center.map(coord).join(','))
+  if (boundingBox) params.set('bounding-box', boundingBox.map(coord).join(','))
   if (boundedPositions) {
-    params.set('bounded-positions', boundedPositions.flat().join(','))
+    params.set(
+      'bounded-positions',
+      boundedPositions.flat().map(coord).join(','),
+    )
   }
 
   // The API accepts kebab-case on the wire and camelCase for older callers;

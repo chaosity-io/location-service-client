@@ -240,6 +240,51 @@ describe('fetchMapStyle', () => {
       'name',
     ])
   })
+
+  it('leaves house numbers and road shields alone — they do not label by name (#28)', async () => {
+    // The three shapes as the AWS Standard descriptor declares them. Before
+    // the fix all three became the name coalesce, and the two non-name layers
+    // then read a property their features do not have: house numbers and
+    // shields vanished from every map that asked for a language, `en`
+    // included.
+    const houseNumber = ['to-string', ['get', 'addr_housenumber']]
+    const shield = ['to-string', ['get', 'shield_text']]
+    fetchMock.mockImplementation(async () =>
+      descriptor([
+        {
+          id: 'building_label_number',
+          type: 'symbol',
+          layout: { 'text-field': houseNumber },
+        },
+        {
+          id: 'shield_generic',
+          type: 'symbol',
+          layout: { 'text-field': shield },
+        },
+        {
+          id: 'place_label',
+          type: 'symbol',
+          layout: {
+            'text-field': ['coalesce', ['get', 'name:en'], ['get', 'name']],
+          },
+        },
+      ]),
+    )
+
+    const style = await fetchMapStyle(API, 'Standard', token, {
+      language: 'fr',
+    })
+    const [number, shieldLayer, place] = style.layers as never[]
+
+    expect(number.layout['text-field']).toEqual(houseNumber)
+    expect(shieldLayer.layout['text-field']).toEqual(shield)
+    expect(place.layout['text-field']).toEqual([
+      'coalesce',
+      ['get', 'name:fr'],
+      ['get', 'name:en'],
+      ['get', 'name'],
+    ])
+  })
 })
 
 describe('POI visibility', () => {
@@ -348,6 +393,17 @@ describe('applyMapLanguage on a live map', () => {
     const { map, setLayoutProperty } = mapWith(
       [{ id: 'a', type: 'symbol' }],
       undefined,
+    )
+    applyMapLanguage(map, 'de')
+    expect(setLayoutProperty).not.toHaveBeenCalled()
+  })
+
+  it('skips a symbol layer that does not label by name (#28)', () => {
+    // A live-map language switch has the same rule as the descriptor rewrite:
+    // a house-number or shield layer keeps its own text-field.
+    const { map, setLayoutProperty } = mapWith(
+      [{ id: 'building_label_number', type: 'symbol' }],
+      ['to-string', ['get', 'addr_housenumber']],
     )
     applyMapLanguage(map, 'de')
     expect(setLayoutProperty).not.toHaveBeenCalled()
