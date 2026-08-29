@@ -10,6 +10,7 @@ import type {
   TrafficMode,
   TravelMode,
 } from './mapEnums'
+import { labelsByName, languageExpression } from './mapLanguage'
 
 /**
  * Options for building an AWS Location Service map style URL.
@@ -152,29 +153,25 @@ export async function fetchMapStyle(
 }
 
 /**
- * Apply a preferred language to all symbol layers within a style descriptor object.
+ * Apply a preferred language to the name labels within a style descriptor.
  * Mutates the style in place — call before passing to MapLibre.
+ *
+ * Only a `text-field` that reads a name property is rewritten. House numbers
+ * (`addr_housenumber`) and road shields (`shield_text`) used to be rewritten
+ * too, and vanished from every map that asked for a language (#28); the rule
+ * lives in `labelsByName` so this and `applyMapLanguage` cannot disagree.
  */
 function applyLanguageToDescriptor(
   style: StyleSpecification,
   language: string,
 ): void {
-  const expression =
-    language === 'en'
-      ? ['coalesce', ['get', 'name:en'], ['get', 'name']]
-      : [
-          'coalesce',
-          ['get', `name:${language}`],
-          ['get', 'name:en'],
-          ['get', 'name'],
-        ]
+  const expression = languageExpression(language)
 
   for (const layer of style.layers) {
-    if (layer.type === 'symbol') {
-      const layout = layer.layout as Record<string, unknown> | undefined
-      if (layout?.['text-field'] !== undefined) {
-        layout['text-field'] = expression
-      }
-    }
+    if (layer.type !== 'symbol') continue
+    const layout = layer.layout as Record<string, unknown> | undefined
+    if (layout?.['text-field'] === undefined) continue
+    if (!labelsByName(layout['text-field'])) continue
+    layout['text-field'] = expression
   }
 }
