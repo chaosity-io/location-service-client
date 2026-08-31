@@ -1,6 +1,6 @@
 import type { StyleSpecification } from 'maplibre-gl'
 
-import { parseErrorResponse } from '../transport/errors'
+import { parseErrorResponse } from '../transport/errors.js'
 import type {
   Buildings,
   ColorScheme,
@@ -9,8 +9,8 @@ import type {
   Terrain,
   TrafficMode,
   TravelMode,
-} from './mapEnums'
-import { labelsByName, languageExpression } from './mapLanguage'
+} from './mapEnums.js'
+import { labelsByName, languageExpression } from './mapLanguage.js'
 
 /**
  * Options for building an AWS Location Service map style URL.

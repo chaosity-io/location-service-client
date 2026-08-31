@@ -22,6 +22,18 @@ AWS Location Service compatible client with custom Bearer token authentication.
 npm install @chaosity/location-client
 ```
 
+The Places commands, the transport and the static-map and style-URL helpers need
+nothing else. The **map** features are optional peer dependencies, so install
+them only if you use them:
+
+```bash
+# interactive map helpers (createTransformRequest, applyMapLanguage, POI toggles)
+npm install maplibre-gl
+
+# the MapLibre geocoder control (the GeoPlaces adapter)
+npm install maplibre-gl @maplibre/maplibre-gl-geocoder
+```
+
 ## Key Features
 
 - **Custom Authentication**: Uses Bearer tokens instead of AWS SigV4
@@ -155,6 +167,8 @@ setAllPoiVisibility(map, false)
 Available categories: `food_drink`, `entertainment`, `sights`, `transit`, `accommodations`, `leisure`, `shopping`, `business`, `facilities`, `areas`, `parks`.
 
 ### MapLibre Geocoder Integration
+
+Requires the optional peers: `npm install maplibre-gl @maplibre/maplibre-gl-geocoder`
 
 ```typescript
 import { GeoPlacesClient, GeoPlaces } from '@chaosity/location-client'

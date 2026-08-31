@@ -1,8 +1,8 @@
 import debug from 'debug'
 import { createHash } from 'node:crypto'
-import { TokenProvider } from '../auth/TokenProvider'
-import { LocationServiceException } from '../errors/LocationServiceException'
-import type { ClientConfig } from '../types'
+import { TokenProvider } from '../auth/TokenProvider.js'
+import { LocationServiceException } from '../errors/LocationServiceException.js'
+import type { ClientConfig } from '../types/index.js'
 export interface ServerAuthConfig {
   apiUrl?: string
   clientId?: string

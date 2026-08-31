@@ -1,4 +1,4 @@
-import { LocationServiceException } from '../errors/LocationServiceException'
+import { LocationServiceException } from '../errors/LocationServiceException.js'
 
 /**
  * Turn a non-2xx response into a LocationServiceException.

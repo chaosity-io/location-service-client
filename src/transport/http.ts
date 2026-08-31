@@ -1,6 +1,6 @@
 import debug from 'debug'
-import { LocationServiceException } from '../errors/LocationServiceException'
-import { parseErrorResponse, parseRetryAfter } from './errors'
+import { LocationServiceException } from '../errors/LocationServiceException.js'
+import { parseErrorResponse, parseRetryAfter } from './errors.js'
 
 const log = debug('location-client:transport')
 
