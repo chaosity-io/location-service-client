@@ -1,5 +1,6 @@
 import debug from 'debug'
 import { createHash } from 'node:crypto'
+import type { TokenResponse } from '../auth/TokenProvider.js'
 import { TokenProvider } from '../auth/TokenProvider.js'
 import { LocationServiceException } from '../errors/LocationServiceException.js'
 import type { ClientConfig } from '../types/index.js'
@@ -7,6 +8,15 @@ export interface ServerAuthConfig {
   apiUrl?: string
   clientId?: string
   clientSecret?: string
+  /**
+   * Mint a new token instead of returning the cached one.
+   *
+   * For the case the cache cannot see: a token the API has stopped accepting
+   * before its `exp` — revoked in the portal, or issued against a secret that
+   * has since been rotated. `TokenProvider` judges freshness from `exp` alone,
+   * so without this a caller holding a dead token waits out its whole lifetime.
+   */
+  forceRefresh?: boolean
 }
 
 const log = debug('location-client:clientConfig')
@@ -45,6 +55,132 @@ export interface ServerClientConfig extends ClientConfig {
 }
 
 /**
+ * Where the API lives, from the argument or the environment.
+ *
+ * Separate from the credentials because the two are independently overridable:
+ * a caller can hand `LocationServiceConnector` its own `token` and still expect
+ * `LOCATION_API_URL` to say where to send it.
+ */
+export function resolveApiUrl(explicit?: string): string | undefined {
+  return (
+    explicit ||
+    process.env.LOCATION_API_URL ||
+    process.env.LOCATION_SERVICE_API_URL
+  )
+}
+
+/**
+ * A LIVE token source: resolved credentials plus a `getToken` that re-mints
+ * when the cached token is spent.
+ *
+ * This is the seam `getClientConfig` and `LocationServiceConnector` share, and
+ * it exists because the two need different SHAPES of the same thing.
+ * `getClientConfig` has to return plain data — see the warning on its return
+ * value — so it can only ever hand back a snapshot. The connector is long-lived
+ * and needs the source itself, or it dies at the first `exp` (#36).
+ *
+ * Deliberately not exported from `./server`: it hands out a callable bound to
+ * the process-wide provider, and the public surface stays the two functions
+ * that were already there.
+ */
+export interface ServerTokenSource {
+  apiUrl: string
+  /** Resolves with a token or rejects; it never resolves tokenless. */
+  getToken(forceRefresh?: boolean): Promise<TokenResponse & { token: string }>
+}
+
+export function serverTokenSource(
+  config: ServerAuthConfig = {},
+): ServerTokenSource {
+  log('[serverTokenSource] Starting with config:', {
+    hasApiUrl: !!config.apiUrl,
+    hasClientId: !!config.clientId,
+  })
+
+  // Auto-detect from environment with fallbacks
+  const apiUrl = resolveApiUrl(config.apiUrl)
+
+  const clientId =
+    config.clientId ||
+    process.env.LOCATION_CLIENT_ID ||
+    process.env.LOCATION_SERVICE_CLIENT_ID
+
+  const clientSecret =
+    config.clientSecret ||
+    process.env.LOCATION_CLIENT_SECRET ||
+    process.env.LOCATION_SERVICE_CLIENT_SECRET
+
+  log('[serverTokenSource] Resolved config:', {
+    apiUrl,
+    clientId: clientId?.substring(0, 10) + '...',
+  })
+
+  // Validate required values. A LocationServiceException like everything else
+  // this package throws — it used to be a bare `Error`, which was survivable
+  // while only `getClientConfig` could raise it and is not now that the
+  // connector reaches this path too.
+  if (!apiUrl || !clientId || !clientSecret) {
+    console.error('[location-client] Missing required configuration')
+    throw new LocationServiceException({
+      code: 'ValidationException',
+      message:
+        'Missing required configuration. Set environment variables: ' +
+        'LOCATION_API_URL, LOCATION_CLIENT_ID, LOCATION_CLIENT_SECRET',
+      details: { source: 'client' },
+    })
+  }
+
+  log('[serverTokenSource] Getting TokenProvider instance')
+  const provider = getTokenProvider(apiUrl, clientId, clientSecret)
+
+  return {
+    apiUrl,
+    async getToken(
+      forceRefresh = false,
+    ): Promise<TokenResponse & { token: string }> {
+      log('[serverTokenSource] Fetching token (forceRefresh=%s)', forceRefresh)
+      let result
+      try {
+        result = await provider.getToken(forceRefresh)
+      } catch (error) {
+        // The provider now rejects rather than resolving with success:false, and
+        // the rejection is typed — so a store outage (503) can be reported as a
+        // store outage instead of as bad credentials.
+        if (error instanceof LocationServiceException) {
+          if (error.isAuth) {
+            throw new LocationServiceException({
+              code: 'InvalidCredentialsException',
+              message:
+                `Authentication failed for client ID "${clientId}". ` +
+                `Verify LOCATION_CLIENT_ID and LOCATION_CLIENT_SECRET match your application in the developer portal.`,
+              statusCode: error.statusCode,
+              requestId: error.requestId,
+              cause: error,
+            })
+          }
+          throw error
+        }
+        throw error
+      }
+
+      // TokenProvider rejects rather than returning a tokenless success, so this
+      // is unreachable in practice — it is here to keep the contract explicit at
+      // the type level rather than asserting non-null.
+      const token = result.token
+      if (!token) {
+        throw new LocationServiceException({
+          code: 'InvalidCredentialsException',
+          message: 'Token provider returned no token',
+          details: { source: 'client' },
+        })
+      }
+
+      return { ...result, token }
+    },
+  }
+}
+
+/**
  * Get client configuration with OAuth2 authentication.
  *
  * Automatically reads from environment variables:
@@ -63,6 +199,21 @@ export interface ServerClientConfig extends ClientConfig {
  * NEVER call from browser/client code as it exposes credentials.
  * For SPA projects, create your own backend endpoint that calls this.
  *
+ * ## The return value is PLAIN DATA, and has to stay that way
+ *
+ * `{ apiUrl, token, expiresAt }` — no methods, no closures. The reason is not
+ * style: the shape every sample uses is a Next.js Server Action that returns
+ * this straight to a Client Component (every `src/lib/actions/location.ts`
+ * under `location-service-samples/web`), and the RSC boundary
+ * serialises it. A function on this object is not serialisable and throws at
+ * the boundary, so "make getClientConfig return getToken" — which #36 proposed
+ * and this JSDoc used to promise two lines below — would break every Next.js
+ * consumer of the library.
+ *
+ * A caller that needs a token which REFRESHES wants one of:
+ * - `LocationServiceConnector`, which holds a live source internally (#36), or
+ * - `TokenProvider` directly, if it is managing its own lifecycle.
+ *
  * @example
  * // Auto-detect from environment
  * const config = await getClientConfig()
@@ -70,93 +221,21 @@ export interface ServerClientConfig extends ClientConfig {
  * // Or override specific values
  * const config = await getClientConfig({ apiUrl: 'https://custom.api.com' })
  *
- * // Use getToken() for automatic caching and refresh
- * const { token } = await config.getToken()
- * const connector = new LocationServiceConnector({ apiUrl: config.apiUrl, token })
+ * // The API rejected the token before its exp — revoked, or secret rotated
+ * const fresh = await getClientConfig({ forceRefresh: true })
  */
 export async function getClientConfig(
   config: ServerAuthConfig = {},
 ): Promise<ServerClientConfig> {
-  log('[getClientConfig] Starting with config:', {
-    hasApiUrl: !!config.apiUrl,
-    hasClientId: !!config.clientId,
-  })
-
-  // Auto-detect from environment with fallbacks
-  const apiUrl =
-    config.apiUrl ||
-    process.env.LOCATION_API_URL ||
-    process.env.LOCATION_SERVICE_API_URL
-
-  const clientId =
-    config.clientId ||
-    process.env.LOCATION_CLIENT_ID ||
-    process.env.LOCATION_SERVICE_CLIENT_ID
-
-  const clientSecret =
-    config.clientSecret ||
-    process.env.LOCATION_CLIENT_SECRET ||
-    process.env.LOCATION_SERVICE_CLIENT_SECRET
-
-  log('[getClientConfig] Resolved config:', {
-    apiUrl,
-    clientId: clientId?.substring(0, 10) + '...',
-  })
-
-  // Validate required values
-  if (!apiUrl || !clientId || !clientSecret) {
-    console.error('[getClientConfig] Missing required configuration')
-    throw new Error(
-      'Missing required configuration. Set environment variables: ' +
-        'LOCATION_API_URL, LOCATION_CLIENT_ID, LOCATION_CLIENT_SECRET',
-    )
-  }
-
-  log('[getClientConfig] Getting TokenProvider instance')
-  const provider = getTokenProvider(apiUrl, clientId, clientSecret)
-
-  log('[getClientConfig] Fetching token')
-  let result
-  try {
-    result = await provider.getToken()
-  } catch (error) {
-    // The provider now rejects rather than resolving with success:false, and the
-    // rejection is typed — so a store outage (503) can be reported as a store
-    // outage instead of as bad credentials.
-    if (error instanceof LocationServiceException) {
-      if (error.isAuth) {
-        throw new LocationServiceException({
-          code: 'InvalidCredentialsException',
-          message:
-            `Authentication failed for client ID "${clientId}". ` +
-            `Verify LOCATION_CLIENT_ID and LOCATION_CLIENT_SECRET match your application in the developer portal.`,
-          statusCode: error.statusCode,
-          requestId: error.requestId,
-          cause: error,
-        })
-      }
-      throw error
-    }
-    throw error
-  }
-
-  // TokenProvider rejects rather than returning a tokenless success, so this is
-  // unreachable in practice — it is here to keep the contract explicit at the
-  // type level rather than asserting non-null.
-  if (!result.token) {
-    throw new LocationServiceException({
-      code: 'InvalidCredentialsException',
-      message: 'Token provider returned no token',
-      details: { source: 'client' },
-    })
-  }
+  const source = serverTokenSource(config)
+  const result = await source.getToken(config.forceRefresh)
 
   log(
     '[getClientConfig] Token fetched successfully, length:',
     result.token.length,
   )
   return {
-    apiUrl,
+    apiUrl: source.apiUrl,
     token: result.token,
     expiresAt: result.expiresAt,
   }

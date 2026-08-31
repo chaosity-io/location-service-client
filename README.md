@@ -69,6 +69,10 @@ Set these environment variables:
 LOCATION_API_URL=https://api.chaosity.cloud
 LOCATION_CLIENT_ID=your-client-id
 LOCATION_CLIENT_SECRET=your-client-secret
+
+# Only for LocationServiceConnector: the Origin sent on every data request.
+# The API answers 403 without one it recognises — see below.
+LOCATION_ORIGIN=https://your-allowed-domain.example
 ```
 
 Or pass credentials explicitly:
@@ -207,12 +211,23 @@ const client = new GeoPlacesClient({
   apiUrl: string,
   token: string,
   getToken?: () => string | undefined, // Optional: dynamic token getter
+  refreshToken?: () => Promise<string | undefined>, // Optional: 401 self-heal
 })
 
 await client.send(command)
 ```
 
 When `getToken` is provided, it is called on every request so token updates are reflected without recreating the client.
+
+`refreshToken` covers the case `getToken` cannot. `getToken` is synchronous —
+MapLibre's `transformRequest` requires that — so it can only ever return the
+token already in hand, and a token the API stops accepting **before** its `exp`
+(revoked, or issued against a since-rotated secret) fails every request until
+the refresh buffer elapses. `refreshToken` is awaited after a 401, and the
+request is retried **once** with what it returns. Return the same token, or
+nothing, and no retry is sent — a request that is going to fail again is not
+worth being billed for twice. A 403 is never retried: a new token cannot fix an
+`Origin` the application does not allow.
 
 #### GeoPlaces Adapter
 
@@ -351,7 +366,18 @@ import { getClientConfig } from '@chaosity/location-client/server'
 
 const config = await getClientConfig()
 // { apiUrl: string, token: string, expiresAt?: number }
+
+// The API has rejected a token that has not reached its exp — revoked in the
+// portal, or issued against a client secret that has since been rotated.
+const replacement = await getClientConfig({ forceRefresh: true })
 ```
+
+The return value is **plain data** — no methods, no closures — so it can be
+returned straight out of a Next.js Server Action to a Client Component. It is
+therefore a snapshot: the token in it stops working at its `expiresAt`, and the
+caller asks for another. For a long-lived server process that should just keep
+working, use `LocationServiceConnector`, which holds a live token source and
+refreshes for you.
 
 #### TokenProvider
 
@@ -371,14 +397,18 @@ const { success, token, expiresAt } = await provider.getToken()
 
 #### LocationServiceConnector
 
-Server-side connector for backend-to-backend API calls. Can auto-configure from environment variables when no config is passed.
+Server-side connector for backend-to-backend API calls. It **completes** its
+configuration from the environment rather than replacing it, so you supply only
+the parts the environment does not have:
 
 ```typescript
 import { LocationServiceConnector } from '@chaosity/location-client/server'
 
+// apiUrl + credentials from LOCATION_API_URL / LOCATION_CLIENT_ID /
+// LOCATION_CLIENT_SECRET; Origin from here. Set LOCATION_ORIGIN as well and
+// `new LocationServiceConnector()` needs no arguments at all.
 const connector = new LocationServiceConnector({
-  apiUrl: config.apiUrl,
-  token: config.token,
+  origin: 'https://your-allowed-domain.example',
 })
 
 const result = await connector.send(
@@ -386,9 +416,34 @@ const result = await connector.send(
 )
 ```
 
+**Every data request needs an `Origin` the service recognises, and the API
+answers 403 without one** — server-to-server calls included, not just browsers.
+In a browser the browser sets it; here you do, with `origin` above,
+`LOCATION_ORIGIN`, or a per-call header (`send(cmd, { headers: { Origin } })`,
+which wins over both). `/auth/token` is the one endpoint exempt.
+
+A connector configured this way keeps working indefinitely: it holds a live
+token source, refreshes before expiry, and retries once with a new token if the
+API rejects the one it sent. Pass an explicit `token` instead and you opt out of
+all of that — it is a fixed string, and it dies at its own `exp`:
+
+```typescript
+// Managing credentials yourself: an explicit token source wins outright, and
+// the environment is not consulted.
+const connector = new LocationServiceConnector({
+  apiUrl,
+  origin: 'https://your-allowed-domain.example',
+  getToken: (forceRefresh) => provider.getToken(forceRefresh),
+})
+```
+
 ## Cache-Friendly Position Rounding
 
-`BiasPosition` coordinates are automatically rounded to 2 decimal places (~1.1 km grid) before each API request. This maximizes cache hits across nearby users without affecting result quality — bias is approximate by nature.
+`BiasPosition` coordinates are automatically rounded before each API request, to
+whatever precision your application is entitled to — a `biasDecimals` claim on
+the access token, defaulting to **3 decimal places** (~110 m) when the token
+carries none. This maximizes cache hits across nearby users without affecting
+result quality — bias is approximate by nature.
 
 `QueryPosition` (reverse geocode) retains full precision since it represents an exact point the user selected.
 

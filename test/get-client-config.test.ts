@@ -257,3 +257,72 @@ describe('what it returns', () => {
     expect(JSON.stringify(cfg)).not.toContain('super-secret-value')
   })
 })
+
+describe('forceRefresh reaches past the cache (#36)', () => {
+  const withEnv = () => {
+    process.env.LOCATION_API_URL = 'https://env.test'
+    process.env.LOCATION_CLIENT_ID = 'env-id'
+    process.env.LOCATION_CLIENT_SECRET = 'env-secret'
+  }
+
+  /** Distinct tokens, so "did it re-mint" is visible in the result. */
+  const serialTokens = () => {
+    let n = 0
+    fetchMock.mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({
+            access_token: `${jwt(900).slice(0, -1)}${(n += 1)}`,
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+    )
+  }
+
+  it('serves the cached token by default', async () => {
+    withEnv()
+    serialTokens()
+    const { getClientConfig } = await load()
+
+    const first = await getClientConfig()
+    const second = await getClientConfig()
+
+    expect(second.token).toBe(first.token)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('mints a new one when asked, for a token revoked before its exp', async () => {
+    // The cache judges freshness from `exp` alone, so a token revoked in the
+    // portal — or issued against a since-rotated secret — is still "fresh" to
+    // it. This is the only way past that short of restarting the process.
+    withEnv()
+    serialTokens()
+    const { getClientConfig } = await load()
+
+    const first = await getClientConfig()
+    const second = await getClientConfig({ forceRefresh: true })
+
+    expect(second.token).not.toBe(first.token)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('the return value stays plain data', () => {
+  it('carries no functions, because a Server Action has to serialise it', async () => {
+    // Every Next.js sample returns this straight out of a `'use server'` action
+    // to a Client Component, and the RSC boundary serialises it. #36 proposed
+    // adding `getToken` here; that would throw at the boundary in every one of
+    // them. The connector holds a live token source instead.
+    process.env.LOCATION_API_URL = 'https://env.test'
+    process.env.LOCATION_CLIENT_ID = 'env-id'
+    process.env.LOCATION_CLIENT_SECRET = 'env-secret'
+
+    const { getClientConfig } = await load()
+    const config = await getClientConfig()
+
+    expect(
+      Object.values(config).some((value) => typeof value === 'function'),
+    ).toBe(false)
+    expect(JSON.parse(JSON.stringify(config))).toEqual(config)
+  })
+})

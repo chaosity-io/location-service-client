@@ -92,6 +92,22 @@ function statusCode(status: number): string {
 }
 
 /**
+ * The API has rejected this token: a 401, and only a 401.
+ *
+ * The authorizer throws `Unauthorized` for a token it cannot verify or that has
+ * expired, and API Gateway turns that into a 401. Its other refusals — no
+ * domain configured for the application, an Origin the application does not
+ * allow — are a Deny policy or a service 403, and a fresh token changes
+ * neither. Retrying those would send, and bill, the same doomed request twice.
+ *
+ * Shared by both send paths so the browser client and the server connector
+ * cannot come to different conclusions about the same response.
+ */
+export function isTokenRejected(err: unknown): boolean {
+  return err instanceof LocationServiceException && err.statusCode === 401
+}
+
+/**
  * `Retry-After` is either delta-seconds or an HTTP date. Both are legal and the
  * API sends the first; a date is handled so a proxy or gateway cannot surprise us.
  */
