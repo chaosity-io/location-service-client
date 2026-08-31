@@ -1,5 +1,6 @@
 import debug from 'debug'
 import { resolveEndpoint } from '../transport/endpoints.js'
+import { isTokenRejected } from '../transport/errors.js'
 import type { RequestOptions } from '../transport/http.js'
 import { requestJson } from '../transport/http.js'
 import type { ClientConfig, GeoPlacesCommand } from '../types/index.js'
@@ -43,8 +44,12 @@ export class GeoPlacesClient {
    * case until one is configured in the portal.
    */
   getAppConfig(): AppConfigClaims {
-    const token = this.clientConfig.getToken?.() ?? this.clientConfig.token
-    return readAppConfigClaims(token)
+    return readAppConfigClaims(this.currentToken())
+  }
+
+  /** Prefer the getToken callback (live ref) over a static token string. */
+  private currentToken(): string | undefined {
+    return this.clientConfig.getToken?.() ?? this.clientConfig.token
   }
 
   /**
@@ -56,19 +61,48 @@ export class GeoPlacesClient {
     options?: SendOptions,
   ): Promise<TOutput> {
     const cmd = command as unknown as GeoPlacesCommand
-    const endpoint = resolveEndpoint(cmd)
+    const url = `${this.clientConfig.apiUrl}${resolveEndpoint(cmd)}`
+    const token = this.currentToken()
 
-    // Prefer the getToken callback (live ref) over a static token string.
-    const token = this.clientConfig.getToken?.() ?? this.clientConfig.token
+    try {
+      return await this.dispatch<TOutput>(url, token, cmd, options)
+    } catch (err) {
+      if (!isTokenRejected(err)) throw err
 
+      // One shot. `refreshToken` is the only way to actually obtain a new
+      // token here — `getToken` is synchronous and returns the one already in
+      // hand — but it is re-read as a fallback because a provider that
+      // refreshes in the background may have landed a new one while this
+      // request was in flight.
+      const fresh =
+        (await this.clientConfig.refreshToken?.()) ?? this.currentToken()
+
+      // Nothing new to send. Repeating the request would fail identically, and
+      // be billed identically.
+      if (!fresh || fresh === token) throw err
+
+      log(
+        '401 — retrying %s once with a refreshed token',
+        cmd.constructor?.name,
+      )
+      return await this.dispatch<TOutput>(url, fresh, cmd, options)
+    }
+  }
+
+  private dispatch<TOutput>(
+    url: string,
+    token: string | undefined,
+    cmd: GeoPlacesCommand,
+    options?: SendOptions,
+  ): Promise<TOutput> {
     // Resolve the token BEFORE rounding: the precision this application is
     // entitled to is a claim on it (api#65). Absent claim -> the 3 dp floor.
     const { biasDecimals } = readAppConfigClaims(token)
     const input = roundPositionFields(cmd.input, biasDecimals)
 
-    log('Sending %s to %s', cmd.constructor?.name, endpoint)
+    log('Sending %s to %s', cmd.constructor?.name, url)
     return requestJson<TOutput>(
-      `${this.clientConfig.apiUrl}${endpoint}`,
+      url,
       {
         method: 'POST',
         headers: {

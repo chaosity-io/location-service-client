@@ -67,6 +67,52 @@ describe('createTransformRequest: the Accept header the API depends on', () => {
     expect(out?.headers).toBeUndefined()
   })
 
+  it('does NOT hand the token to a look-alike host (#34)', () => {
+    // `https://api.test` is a string PREFIX of `https://api.test.evil.test`,
+    // so the old startsWith gate attached Authorization here. A style
+    // descriptor is data — its sprite/glyphs/source URLs are the style
+    // author's choice — so this is reachable from any style not wholly ours.
+    const out = t(`${API}.evil.test/maps/tiles/vector.basemap/1/2/3`)
+    expect(out?.headers).toBeUndefined()
+  })
+
+  it.each([
+    ['suffixed host', `${API}.evil.test/maps/tiles/a/1/2/3`],
+    ['host as a userinfo prefix', `https://api.test@evil.test/maps/tiles/a`],
+    ['plain http', `http://api.test/maps/tiles/a/1/2/3`],
+    ['a different port', `https://api.test:8443/maps/tiles/a/1/2/3`],
+    ['a subdomain we did not name', `https://x.api.test/maps/tiles/a`],
+  ])('withholds the token from %s', (_label, url) => {
+    expect(t(url)?.headers).toBeUndefined()
+  })
+
+  it('still matches when only the URL spelling differs', () => {
+    // Same origin by the URL spec, so these are ours: the host is
+    // case-insensitive and :443 is https' default port.
+    for (const url of [
+      `https://API.TEST/maps/tiles/a/1/2/3`,
+      `https://api.test:443/maps/tiles/a/1/2/3`,
+    ]) {
+      expect(t(url)?.headers?.Authorization).toBe('Bearer tok-123')
+    }
+  })
+
+  it('honours a base path, so a co-tenant on the same host is not ours', () => {
+    const scoped = createTransformRequest('https://shared.test/v1', token)
+    expect(scoped(`https://shared.test/v1/maps/tiles/a`)?.headers).toBeDefined()
+    // A prefix of the PATH this time — the same class of bug one level down.
+    expect(
+      scoped(`https://shared.test/v1-internal/maps`)?.headers,
+    ).toBeUndefined()
+    expect(
+      scoped(`https://shared.test/v2/maps/tiles/a`)?.headers,
+    ).toBeUndefined()
+  })
+
+  it('fails closed on a URL it cannot parse', () => {
+    expect(t('not a url at all')?.headers).toBeUndefined()
+  })
+
   it('returns the url unchanged when there is no token yet', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const noToken = createTransformRequest(API, () => undefined)

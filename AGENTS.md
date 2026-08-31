@@ -14,7 +14,7 @@ working, and swaps SigV4 for this service's own bearer-token auth.
 ```bash
 npm run build       # tsc (ESM) + tsc -p tsconfig.cjs.json (CJS) + the CJS marker
 npm run dev         # tsc --watch
-npm test            # vitest run — 192 tests across 10 files
+npm test            # vitest run — 249 tests across 11 files
 npm run test:watch  # vitest interactive
 npm run smoke       # loads dist/ as ESM and as CJS — run it after build
 npm run lint        # eslint . AND prettier --check .
@@ -63,21 +63,70 @@ Every data request needs an `Origin` the service recognises, and it answers
 **403 without one** — server-side calls included, not just browsers. This is the
 single most common "why does my request fail" report.
 
-In a browser the browser sets it. Server-side you must, which is what
-`ConnectorConfig.origin` is for:
+In a browser the browser sets it. Server-side you must: `ConnectorConfig.origin`,
+`LOCATION_ORIGIN` in the environment, or a per-call `Origin` in `send(...)`
+headers, which overrides both.
 
-```ts
-const connector = new LocationServiceConnector({
-  apiUrl,
-  origin: 'https://your-allowed-domain.example',
-  getToken,
-})
-```
+**Exactly one of each system header must leave, whatever the caller
+capitalised.** `fetch` builds its `Headers` by APPENDING, not replacing, so a
+record carrying both `Origin` and `origin` goes out as `Origin: a, b`. Spreading
+the system headers last is NOT enough — it only out-ranks a caller key spelled
+identically. The consequences differ by header and both are real:
 
-A per-call `Origin` in `send(...)` headers still overrides the connector default.
+- `Origin: default, per-call` — the API matches the allowed domain exactly, so
+  it 403s. Two keys with the same value fare no better (`Origin: x, x`).
+- `Authorization: Bearer not-yours, Bearer <real>` — worse than a failed
+  override: a caller's lowercase `authorization` **corrupts** the token rather
+  than being ignored by it.
+
+So `dispatch` drops the caller's spelling of every header it sets — the list is
+`SYSTEM_HEADERS`, kept beside `withoutHeaders`, and it must gain any header the
+record gains. Origin's value comes from `effectiveOrigin`, which the 403
+explanation also reads, so the merge and the explanation cannot disagree about
+whether an Origin was sent; removing the duplicate never overrides the caller's
+intent.
+
+`LocationServiceConnector` is the only place in the package that merges
+caller-supplied headers at all — `GeoPlacesClient`'s `SendOptions` is
+`RequestOptions`, with no `headers` — so if you add a second such site, this is
+the trap.
 
 `/auth/token` is the exception — it is the one endpoint that does not require an
 Origin.
+
+## `LocationServiceConnector` completes its config; it does not replace it
+
+The constructor used to be all-or-nothing —
+`config ? Promise.resolve(config) : getClientConfig()` — and the consequence was
+that **neither documented form could make a successful data call** (#45). The
+zero-argument form read credentials from the environment but had no `origin`, so
+every data request 403'd; `{ origin }`, the obvious repair, took the other branch
+and had no credentials at all.
+
+So: an explicit `token` or `getToken` wins outright — a caller managing its own
+credentials must never have another application's substituted underneath it —
+and **anything short of that is filled in from the environment** (`LOCATION_API_URL`,
+`LOCATION_CLIENT_ID`, `LOCATION_CLIENT_SECRET`, `LOCATION_ORIGIN`, and the
+`LOCATION_SERVICE_*` spellings). Keep that shape when adding a field.
+
+The two ways of supplying a token are not equivalent, and the difference is not
+cosmetic: `token` is a fixed string that dies at its own `exp`, while `getToken`
+and the environment path are LIVE — asked on every request, and asked again with
+`forceRefresh: true` when the API answers 401. Prefer live sources in docs and
+samples.
+
+## `getClientConfig` must keep returning plain data
+
+`{ apiUrl, token, expiresAt }` — no methods, no closures, and this is load-bearing.
+Every Next.js sample returns it straight out of a `'use server'` action to a
+Client Component, and the RSC boundary serialises the result: a function on the
+object throws there. #36 proposed adding `getToken` to it; that would have broken
+every one of them.
+
+A caller needing a token that refreshes wants `LocationServiceConnector` (which
+holds `serverTokenSource` internally) or `TokenProvider` directly.
+`test/get-client-config.test.ts` asserts the shape so the mistake cannot be made
+quietly.
 
 ## Versioning: the caret trap on `0.x`
 
@@ -145,6 +194,17 @@ working around them.
   not make them a hard requirement for consumers who only use the Places
   commands — a consumer who never touches the map surface should not download
   them at all.
+- **Whether a URL gets the bearer token is a URL comparison, never a string
+  prefix.** `url.startsWith(apiUrl)` matched `https://api.example.com.evil.test`
+  against `https://api.example.com` and handed the customer's token to it (#34);
+  a style descriptor is data, so its sprite/glyphs/source URLs are the style
+  author's choice. `createTransformRequest` compares `origin` and requires the
+  path prefix at a `/` boundary, and fails closed on anything unparseable.
+- **A 401 is retried once; a 403 never is.** Both send paths refresh and retry
+  on 401 only, and only when the replacement is genuinely a different token —
+  the API's 403s (Origin not allowed, no domain configured) cannot be fixed by a
+  new token, and re-sending a doomed request bills for it twice. `isTokenRejected`
+  in `transport/errors.ts` is the single place that decides.
 - Tests are vitest and live in `test/`, not beside the source. New behaviour
   needs one; the suite is the only thing standing between a refactor and a
   silent break in a published package.
