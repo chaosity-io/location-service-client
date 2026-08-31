@@ -1,11 +1,11 @@
 import debug from 'debug'
-import { resolveEndpoint } from '../transport/endpoints'
-import type { RequestOptions } from '../transport/http'
-import { requestJson } from '../transport/http'
-import type { ClientConfig, GeoPlacesCommand } from '../types'
-import { roundPositionFields } from '../utils/roundPosition'
-import type { AppConfigClaims } from '../utils/tokenClaims'
-import { readAppConfigClaims } from '../utils/tokenClaims'
+import { resolveEndpoint } from '../transport/endpoints.js'
+import type { RequestOptions } from '../transport/http.js'
+import { requestJson } from '../transport/http.js'
+import type { ClientConfig, GeoPlacesCommand } from '../types/index.js'
+import { roundPositionFields } from '../utils/roundPosition.js'
+import type { AppConfigClaims } from '../utils/tokenClaims.js'
+import { readAppConfigClaims } from '../utils/tokenClaims.js'
 
 const log = debug('location-client:api')
 

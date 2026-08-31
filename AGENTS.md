@@ -12,10 +12,11 @@ working, and swaps SigV4 for this service's own bearer-token auth.
 ## Commands
 
 ```bash
-npm run build       # tsc
+npm run build       # tsc (ESM) + tsc -p tsconfig.cjs.json (CJS) + the CJS marker
 npm run dev         # tsc --watch
 npm test            # vitest run — 192 tests across 10 files
 npm run test:watch  # vitest interactive
+npm run smoke       # loads dist/ as ESM and as CJS — run it after build
 npm run lint        # eslint . AND prettier --check .
 npm run lint:fix    # eslint --fix . && prettier --write .
 ```
@@ -26,8 +27,10 @@ fails the lint step — run `lint:fix`, not just `eslint --fix`.
 ### The push gate
 
 `.husky/pre-push` runs `npm ci --dry-run` (lockfile drift), `npm run lint`,
-`npm test`, then **`npm run build`** — so a push needs a clean compile, not just
-green tests. Type errors that vitest tolerates are stopped here.
+`npm test`, **`npm run build`**, then **`npm run smoke`** — so a push needs a
+clean compile and a package that actually loads, not just green tests. Type
+errors that vitest tolerates are stopped by the build; a package that compiles
+but cannot be `import`ed is stopped by the smoke step (see Conventions).
 
 ## The one boundary that matters: `.` vs `./server`
 
@@ -107,12 +110,41 @@ working around them.
 
 ## Conventions
 
-- **ESM only** (`"type": "module"`), output to `dist/` by `tsc`. There is no CJS
-  build, and **#35 reports the ESM entry point itself failing with
-  `ERR_MODULE_NOT_FOUND`**, plus missing `sideEffects` and `engines`. Check that
-  issue before trusting the published package layout or adding to it.
-- `maplibre-gl` is an **optional peer dependency**. Map helpers must not make it
-  a hard requirement for consumers who only use the Places commands.
+- **Relative imports in `src/` must carry a `.js` extension**, even though the
+  source is `.ts`: `import { x } from './transport/http.js'`. This applies to
+  `src/` — what `tsc` compiles and emits. Files in `test/` are outside
+  `tsconfig.json`'s `include`, are never emitted, and are resolved by vitest, so
+  they stay extensionless; leave them alone. `tsconfig.json` is
+  `moduleResolution: NodeNext`, which is what Node's own ESM resolver requires —
+  and TypeScript maps the `.js` specifier back to the `.ts` file for you. This is
+  the single easiest thing to get wrong here, and it used to be wrong everywhere:
+  the package emitted extensionless specifiers, so every `import` outside a
+  bundler died with `ERR_MODULE_NOT_FOUND` (#35). `0.5.1` is published in that
+  state.
+- **Dual ESM/CJS** (`"type": "module"`). `npm run build` runs `tsc` twice: ESM
+  into `dist/`, CommonJS into `dist/cjs/`, and `scripts/finish-cjs.mjs` writes a
+  `{"type":"commonjs"}` package.json beside the second so Node reads it as CJS.
+  The `exports` map routes `import` and `require` accordingly. Adding an entry
+  point means adding **both** conditions.
+- **One process should load one half, not both.** That is the standing cost of a
+  dual package: `require` and `import` get separate module registries, so a
+  consumer mixing them holds two `LocationServiceException` classes — and
+  `instanceof` fails across that line, on the one error type callers are told to
+  catch — plus two copies of `getClientConfig`'s module-level token cache. Pick a
+  module system per process and stay in it.
+- **`npm run smoke` is the test that a build cannot replace.** It resolves
+  `dist/` through Node itself as ESM and as CJS, checks both entry points expose
+  what they promise, asserts the two module systems expose the _same_ surface,
+  and re-checks that nothing server-only leaks into the root. Everything else in
+  the gate passed while the package was unloadable.
+- The root re-exports both AWS barrels with `export *`, which no bundler can
+  tree-shake: a consumer importing only a map helper still pays ~93 KB. Tracked
+  in **#42** — prefer fixing it over adding another `export *`.
+- `maplibre-gl` and `@maplibre/maplibre-gl-geocoder` are **optional peer
+  dependencies**, and both are imported with `import type` only. Map helpers must
+  not make them a hard requirement for consumers who only use the Places
+  commands — a consumer who never touches the map surface should not download
+  them at all.
 - Tests are vitest and live in `test/`, not beside the source. New behaviour
   needs one; the suite is the only thing standing between a refactor and a
   silent break in a published package.

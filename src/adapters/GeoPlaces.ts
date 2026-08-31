@@ -25,7 +25,7 @@ import type {
 } from '@maplibre/maplibre-gl-geocoder'
 import debug from 'debug'
 import type { Map } from 'maplibre-gl'
-import type { GeoPlacesClient } from '../client/GeoPlacesClient'
+import type { GeoPlacesClient } from '../client/GeoPlacesClient.js'
 
 const log = debug('location-client:geocoder')
 

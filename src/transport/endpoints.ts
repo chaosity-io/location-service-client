@@ -7,8 +7,8 @@ import {
   SearchTextCommand,
   SuggestCommand,
 } from '@aws-sdk/client-geo-places'
-import { LocationServiceException } from '../errors/LocationServiceException'
-import type { GeoPlacesCommand } from '../types'
+import { LocationServiceException } from '../errors/LocationServiceException.js'
+import type { GeoPlacesCommand } from '../types/index.js'
 
 type CommandConstructor = new (...args: never[]) => GeoPlacesCommand
 

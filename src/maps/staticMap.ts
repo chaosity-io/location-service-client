@@ -1,11 +1,11 @@
-import { parseErrorResponse } from '../transport/errors'
+import { parseErrorResponse } from '../transport/errors.js'
 import type {
   ColorScheme,
   LabelSize,
   MapFeatureMode,
   ScaleBarUnit,
   StaticMapStyle,
-} from './mapEnums'
+} from './mapEnums.js'
 
 /**
  * Static maps: build the URL, send the right headers, get a Blob.

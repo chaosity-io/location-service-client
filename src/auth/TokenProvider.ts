@@ -1,7 +1,10 @@
 import debug from 'debug'
-import { LocationServiceException } from '../errors/LocationServiceException'
-import { requestJson } from '../transport/http'
-import { TOKEN_REFRESH_BUFFER_SECONDS, readTokenExpiry } from './tokenRefresh'
+import { LocationServiceException } from '../errors/LocationServiceException.js'
+import { requestJson } from '../transport/http.js'
+import {
+  TOKEN_REFRESH_BUFFER_SECONDS,
+  readTokenExpiry,
+} from './tokenRefresh.js'
 
 const log = debug('location-client:auth')
 

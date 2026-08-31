@@ -1,4 +1,4 @@
-import type { MapLike } from '../types'
+import type { MapLike } from '../types/index.js'
 
 /**
  * The `text-field` expression that prefers `language`, then English, then the
