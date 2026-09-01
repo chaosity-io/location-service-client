@@ -14,7 +14,7 @@ working, and swaps SigV4 for this service's own bearer-token auth.
 ```bash
 npm run build       # tsc (ESM) + tsc -p tsconfig.cjs.json (CJS) + the CJS marker
 npm run dev         # tsc --watch
-npm test            # vitest run — 249 tests across 11 files
+npm test            # vitest run — 269 tests across 11 files
 npm run test:watch  # vitest interactive
 npm run smoke       # loads dist/ as ESM and as CJS — run it after build
 npm run lint        # eslint . AND prettier --check .
@@ -200,11 +200,51 @@ working around them.
   a style descriptor is data, so its sprite/glyphs/source URLs are the style
   author's choice. `createTransformRequest` compares `origin` and requires the
   path prefix at a `/` boundary, and fails closed on anything unparseable.
+- **Every outbound request goes through `transport/http.ts`.** There is exactly
+  one `fetch(` call in `src/`, inside `request()`, and that is the invariant:
+  timeout, overall budget, cancellation, retry and the single error type all
+  live there, so anything bypassing it silently opts out of all five. The two
+  map fetches did, and a network fault there escaped as a raw `TypeError` while
+  the identical fault anywhere else arrived as `NetworkException` (#37). Read
+  the body INSIDE the loop — `requestJson` and `requestBlob` pass a reader in
+  for exactly that reason — or a malformed body stops being a retryable attempt
+  and becomes a raw `SyntaxError`.
+- **`timeoutMs` bounds an attempt; `overallTimeoutMs` bounds the call.** The
+  gap between those two is where a caller's deadline used to disappear: the API
+  answers a spent quota with `Retry-After: 60`, honoured literally twice, so a
+  30-second caller waited two minutes. A wait that would outlast the remaining
+  budget is not taken at all — the API's own error is thrown instead, with
+  `retryAfterMs` on it, which is more useful to the caller than a timeout. The
+  30 s default sits just under the old worst case (three default attempts that
+  all time out came to ~30.75 s), so the overlap is a ~0.75 s window in a third
+  attempt whose two predecessors both timed out — small, but not empty, which is
+  why it went out in a minor.
+- **Nothing sends `Bearer undefined`.** Five places in `src/` interpolate a
+  token into an `Authorization` header, and every one of them checks first:
+  `GeoPlacesClient` (which asks `refreshToken` before refusing, since the 401
+  self-heal cannot cover a request that was never accepted),
+  `LocationServiceConnector`, `fetchMapStyle`, `fetchStaticMap`, and
+  `createTransformRequest` — which warns and omits the header rather than
+  throwing, because MapLibre calls it synchronously and cannot handle a throw.
+  The shared factory is `noTokenAvailable` in `transport/errors.ts`; only the
+  advice differs per path. A sixth site must join the list, not the exceptions.
+- **The server token cache is a bounded LRU, not a slot.** `getClientConfig`
+  held ONE `TokenProvider` in two module variables, so a process serving two
+  applications evicted on every alternation — a full `/auth/token` round trip
+  per call, a jti row each, against the one shared token-endpoint throttle, at a
+  0% hit rate (#39). It is now `Map<configKey, TokenProvider>` capped at
+  `MAX_CACHED_PROVIDERS`, re-inserted on a hit so insertion order IS the recency
+  order. The key still hashes the client secret (#5) — do not simplify it.
 - **A 401 is retried once; a 403 never is.** Both send paths refresh and retry
   on 401 only, and only when the replacement is genuinely a different token —
   the API's 403s (Origin not allowed, no domain configured) cannot be fixed by a
-  new token, and re-sending a doomed request bills for it twice. `isTokenRejected`
+  new token, and re-sending a doomed request sends it twice. `isTokenRejected`
   in `transport/errors.ts` is the single place that decides.
+- **An error response is not billed, whatever its status.** The service meters
+  successful requests, so a 401, a 403 or a 400 costs the caller a round trip and
+  its own deadline — not money. Worth checking before writing "and it is billed"
+  into a comment about a failure path: this file has now had that sentence wrong
+  twice, first claiming a 401 was billed and then a 403.
 - Tests are vitest and live in `test/`, not beside the source. New behaviour
   needs one; the suite is the only thing standing between a refactor and a
   silent break in a published package.

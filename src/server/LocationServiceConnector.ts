@@ -1,7 +1,7 @@
 import debug from 'debug'
 import { LocationServiceException } from '../errors/LocationServiceException.js'
 import { resolveEndpoint } from '../transport/endpoints.js'
-import { isTokenRejected } from '../transport/errors.js'
+import { isTokenRejected, noTokenAvailable } from '../transport/errors.js'
 import type { RequestOptions } from '../transport/http.js'
 import { requestJson } from '../transport/http.js'
 import type { GeoPlacesCommand } from '../types/index.js'
@@ -89,6 +89,13 @@ function headerValue(
  * spelling of it survives the merge.
  */
 const SYSTEM_HEADERS = ['origin', 'content-type', 'authorization']
+
+/**
+ * What to check when the token source comes up empty. The guard itself is
+ * shared with the map fetches (`noTokenAvailable`); only the advice differs,
+ * and on this path the answer is always the credentials.
+ */
+const NO_TOKEN_ADVICE = 'check clientId/clientSecret configuration'
 
 /** The caller's headers minus `names`, however they capitalised them. */
 function withoutHeaders(
@@ -277,7 +284,7 @@ export class LocationServiceConnector {
     options?: SendOptions,
   ): Promise<TOutput> {
     const token = await source.get()
-    if (!token) throw noTokenAvailable()
+    if (!token) throw noTokenAvailable(NO_TOKEN_ADVICE)
 
     try {
       return await this.dispatch<TOutput>(url, token, cmd, options)
@@ -288,8 +295,8 @@ export class LocationServiceConnector {
       // token. That single comparison covers every source: a fixed `token`
       // string, a caller `getToken` that ignores `forceRefresh`, and a cached
       // token the API has revoked before its `exp` all hand back what we
-      // already sent — and re-sending it would be a second doomed request, and
-      // a second billed one.
+      // already sent — and re-sending it would be a second doomed request for
+      // the same answer.
       const fresh = await source.get(true)
       if (!fresh || fresh === token) throw err
 
@@ -357,12 +364,4 @@ function requireApiUrl(explicit?: string): string {
     })
   }
   return apiUrl
-}
-
-function noTokenAvailable(): LocationServiceException {
-  return new LocationServiceException({
-    code: 'InvalidCredentialsException',
-    message: 'No token available — check clientId/clientSecret configuration',
-    details: { source: 'client' },
-  })
 }

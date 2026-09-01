@@ -177,3 +177,81 @@ describe('a successful style is still returned untouched', () => {
     expect(style.version).toBe(8)
   })
 })
+
+describe('the style fetch is on the shared transport (#37)', () => {
+  /**
+   * It used to be a bare `fetch`: no timeout, no retry, no signal, and a
+   * network fault escaping as a raw `TypeError` while the identical fault on
+   * any other call in the package arrived as `NetworkException`.
+   */
+  it('refuses without a token rather than sending Bearer undefined', async () => {
+    const spy = vi.fn()
+    vi.stubGlobal('fetch', spy)
+
+    const err = await fetchMapStyle(
+      'https://api.example.com',
+      'Standard',
+      () => undefined,
+    ).catch((e: unknown) => e as LocationServiceException)
+
+    expect(err).toBeInstanceOf(LocationServiceException)
+    expect(err.code).toBe('InvalidCredentialsException')
+    // Not sent at all: `Bearer undefined` is a request that can only 401 — a
+    // round trip spent to be told what the caller already knows.
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it('retries a 503 and returns the descriptor it eventually gets', async () => {
+    const spy = vi
+      .fn()
+      .mockImplementationOnce(async () => json(503, { message: 'later' }))
+      .mockImplementationOnce(async () =>
+        json(200, { version: 8, sources: {}, layers: [] }),
+      )
+    vi.stubGlobal('fetch', spy)
+
+    const style = await fetchMapStyle(
+      'https://api.example.com',
+      'Standard',
+      () => 'tok',
+    )
+    expect(style.version).toBe(8)
+    expect(spy).toHaveBeenCalledTimes(2)
+  })
+
+  it('reports a network fault as NetworkException, not a raw TypeError', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockRejectedValue(new TypeError('fetch failed')),
+    )
+
+    const err = await fetchMapStyle(
+      'https://api.example.com',
+      'Standard',
+      () => 'tok',
+      {},
+      { retry: false },
+    ).catch((e: unknown) => e as LocationServiceException)
+
+    expect(err).toBeInstanceOf(LocationServiceException)
+    expect(err.code).toBe('NetworkException')
+  })
+
+  it('is cancellable, like every other call', async () => {
+    const spy = vi.fn()
+    vi.stubGlobal('fetch', spy)
+    const controller = new AbortController()
+    controller.abort()
+
+    const err = await fetchMapStyle(
+      'https://api.example.com',
+      'Standard',
+      () => 'tok',
+      {},
+      { signal: controller.signal },
+    ).catch((e: unknown) => e as LocationServiceException)
+
+    expect(err.code).toBe('AbortedException')
+    expect(spy).not.toHaveBeenCalled()
+  })
+})

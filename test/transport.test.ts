@@ -98,6 +98,101 @@ describe('retry policy', () => {
   })
 })
 
+describe('the call has a budget, not just each attempt (#37)', () => {
+  /**
+   * `timeoutMs` bounds an attempt; nothing bounded the CALL. The API answers a
+   * spent quota with `Retry-After: 60`, which the loop honoured literally — two
+   * waits of a minute inside a request that had seconds to live.
+   */
+  const throttled = (retryAfter: string) =>
+    json(
+      { message: 'quota exceeded', code: 'ThrottlingException' },
+      { status: 429, headers: { 'retry-after': retryAfter } },
+    )
+
+  it('does not sit out a Retry-After longer than the call has left', async () => {
+    fetchMock.mockImplementation(async () => throttled('60'))
+
+    const err = await call().catch((e) => e)
+
+    // One attempt, and the answer comes back now rather than in two minutes.
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(err.code).toBe('ThrottlingException')
+    expect(err.statusCode).toBe(429)
+    // The hint survives, so the caller can queue the work instead of guessing.
+    expect(err.retryAfterMs).toBe(60_000)
+  })
+
+  it('still honours a Retry-After that fits inside the budget', async () => {
+    fetchMock
+      .mockResolvedValueOnce(throttled('0'))
+      .mockResolvedValueOnce(json({ ok: true }))
+
+    await expect(call()).resolves.toEqual({ ok: true })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('gives an attempt no more time than the call has left', async () => {
+    // A 3 s per-attempt timeout inside a 100 ms budget is a 100 ms attempt.
+    fetchMock.mockImplementation(
+      (_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () =>
+            reject(Object.assign(new Error('t'), { name: 'TimeoutError' })),
+          )
+        }),
+    )
+
+    const started = Date.now()
+    const err = await call({
+      timeoutMs: 3_000,
+      overallTimeoutMs: 100,
+      retry: false,
+    }).catch((e) => e)
+
+    expect(err.code).toBe('TimeoutException')
+    expect(Date.now() - started).toBeLessThan(1_000)
+  })
+
+  it('refuses a call with no budget at all before sending anything', async () => {
+    const err = await call({ overallTimeoutMs: 0 }).catch((e) => e)
+
+    expect(err.code).toBe('TimeoutException')
+    expect(err.details).toEqual({ source: 'client' })
+    expect(err.message).toContain('overall timeout')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('honours abort() DURING the wait between attempts', async () => {
+    // The backoff timer used to be uncancellable, so an abort here was ignored
+    // until the wait elapsed — up to a whole Retry-After.
+    fetchMock.mockImplementation(async () => throttled('2'))
+
+    const controller = new AbortController()
+    const started = Date.now()
+    const pending = call({ signal: controller.signal })
+
+    // Let the first attempt fail and the wait actually begin.
+    for (let i = 0; i < 20; i++) await Promise.resolve()
+    controller.abort()
+
+    const err = await pending.catch((e) => e)
+    expect(err.code).toBe('AbortedException')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(Date.now() - started).toBeLessThan(1_000)
+  })
+
+  it('rejects a retry budget of zero instead of blaming its own internals', async () => {
+    // `maxAttempts: 0` fell straight through the loop and raised
+    // `InternalException` for a request that was never made.
+    const err = await call({ retry: { maxAttempts: 0 } }).catch((e) => e)
+
+    expect(err.code).toBe('ValidationException')
+    expect(err.message).toContain('maxAttempts')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
+
 describe('one error type for everything', () => {
   it('wraps a network fault as NetworkException, keeping the cause', async () => {
     const original = new TypeError('fetch failed')

@@ -98,7 +98,9 @@ function statusCode(status: number): string {
  * expired, and API Gateway turns that into a 401. Its other refusals — no
  * domain configured for the application, an Origin the application does not
  * allow — are a Deny policy or a service 403, and a fresh token changes
- * neither. Retrying those would send, and bill, the same doomed request twice.
+ * neither. Retrying those sends the same doomed request twice, for the same
+ * answer — which is the whole cost, since the service meters successful
+ * requests and no error response is billed whatever its status.
  *
  * Shared by both send paths so the browser client and the server connector
  * cannot come to different conclusions about the same response.
@@ -120,4 +122,26 @@ export function parseRetryAfter(
   const date = Date.parse(value)
   if (!Number.isNaN(date)) return Math.max(0, date - Date.now())
   return undefined
+}
+
+/**
+ * No token to send, so nothing is sent.
+ *
+ * Every send path resolves a token before it builds a request, and every one of
+ * them can come up empty — a provider that has not initialised, a server action
+ * that returned nothing, credentials that are not configured. Sending anyway
+ * puts the literal string `Bearer undefined` on the wire, which the API answers
+ * with a 401 the caller then has to work backwards from — a whole round trip,
+ * paid for out of the caller's own deadline, to be told what it already knew.
+ * The map fetches did exactly that until #37.
+ *
+ * `advice` says what to check, because that differs by path: a server connector
+ * wants its client credentials looked at, a browser map wants its token source.
+ */
+export function noTokenAvailable(advice: string): LocationServiceException {
+  return new LocationServiceException({
+    code: 'InvalidCredentialsException',
+    message: `No token available — ${advice}`,
+    details: { source: 'client' },
+  })
 }

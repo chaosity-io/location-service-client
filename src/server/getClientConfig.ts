@@ -21,9 +21,33 @@ export interface ServerAuthConfig {
 
 const log = debug('location-client:clientConfig')
 
-// Singleton instance to prevent race conditions
-let tokenProviderInstance: TokenProvider | null = null
-let currentConfig: string | null = null
+/**
+ * How many applications one process keeps token providers for.
+ *
+ * A provider holds a URL, a client id, a secret and one cached JWT, so the
+ * ceiling is about memory containment rather than a tuned working set — 64 is
+ * far above what a single-tenant service needs and far below anything worth
+ * worrying about. An agency past it pays a re-mint for the least recently used
+ * application, which is exactly the behaviour this replaced, but only for the
+ * coldest one instead of for every alternation.
+ */
+export const MAX_CACHED_PROVIDERS = 64
+
+/**
+ * One provider per configuration, most-recently-used last.
+ *
+ * This used to be TWO module-level variables holding a single provider, and a
+ * process serving more than one application therefore evicted the cache on
+ * every alternation: A→B→A→B took a full `/auth/token` round trip per call,
+ * each writing a jti row, all against the one shared token-endpoint throttle.
+ * The hit rate under alternating load was 0% (#39). Nothing leaked between
+ * tenants — each caller closes over the provider it asked for — so what this
+ * fixes is availability and cost, not confidentiality.
+ *
+ * A `Map` iterates in insertion order, so re-inserting on a hit makes the first
+ * key the least recently used, and an LRU needs no other bookkeeping.
+ */
+const tokenProviders = new Map<string, TokenProvider>()
 
 function getTokenProvider(
   apiUrl: string,
@@ -37,20 +61,40 @@ function getTokenProvider(
   // never ends up in a log line (#5).
   const configKey = `${apiUrl}:${clientId}:${createHash('sha256').update(clientSecret).digest('hex').slice(0, 16)}`
 
-  // Reuse existing instance if config matches
-  if (tokenProviderInstance && currentConfig === configKey) {
+  const cached = tokenProviders.get(configKey)
+  if (cached) {
     log('[getTokenProvider] Reusing existing TokenProvider instance')
-    return tokenProviderInstance
+    // Re-insert to mark it most recently used.
+    tokenProviders.delete(configKey)
+    tokenProviders.set(configKey, cached)
+    return cached
   }
 
-  // Create new instance if config changed
   log('[getTokenProvider] Creating new TokenProvider instance')
-  tokenProviderInstance = new TokenProvider({ apiUrl, clientId, clientSecret })
-  currentConfig = configKey
-  return tokenProviderInstance
+  const provider = new TokenProvider({ apiUrl, clientId, clientSecret })
+  tokenProviders.set(configKey, provider)
+
+  if (tokenProviders.size > MAX_CACHED_PROVIDERS) {
+    const leastRecentlyUsed = tokenProviders.keys().next().value
+    /* c8 ignore next — size > 0 here, so the iterator always yields */
+    if (leastRecentlyUsed !== undefined) {
+      log('[getTokenProvider] Evicting the least recently used TokenProvider')
+      tokenProviders.delete(leastRecentlyUsed)
+    }
+  }
+
+  return provider
 }
 
 export interface ServerClientConfig extends ClientConfig {
+  /**
+   * Narrowed back to required. `ClientConfig.token` is optional because a
+   * client can be driven by `getToken`/`refreshToken` alone, but this type is
+   * what `getClientConfig` RESOLVES — it either has a token or it threw — and
+   * widening it would push a needless `string | undefined` onto every consumer
+   * that reads `config.token`.
+   */
+  token: string
   expiresAt?: number
 }
 

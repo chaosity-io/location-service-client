@@ -1,6 +1,8 @@
 import type { StyleSpecification } from 'maplibre-gl'
 
-import { parseErrorResponse } from '../transport/errors.js'
+import { noTokenAvailable } from '../transport/errors.js'
+import type { RequestOptions } from '../transport/http.js'
+import { requestJson } from '../transport/http.js'
 import type {
   Buildings,
   ColorScheme,
@@ -99,6 +101,7 @@ export function buildMapStyleUrl(
  * @param mapStyle - Map style name (e.g. 'Standard', 'Monochrome', 'Satellite', 'Hybrid')
  * @param getToken - Callback returning the current auth token
  * @param options - Style options; `language` is applied to the descriptor, all others become URL params
+ * @param request - Transport options: `signal` to cancel, `timeoutMs`, `overallTimeoutMs`, `retry`
  * @returns Modified MapLibre StyleSpecification object
  *
  * @example
@@ -110,40 +113,44 @@ export async function fetchMapStyle(
   mapStyle: MapStyle,
   getToken: () => string | undefined,
   options: MapStyleOptions & { language?: string } = {},
+  request: RequestOptions = {},
 ): Promise<StyleSpecification> {
   const { language, ...styleOptions } = options
   const url = buildMapStyleUrl(apiUrl, mapStyle, styleOptions)
 
   const token = getToken()
-  const response = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: 'application/json',
-    },
-  })
-
-  if (!response.ok) {
-    // Read the body. The API sends `{message, code, requestId}` and the message
-    // is the whole point of it — for a style request it is Amazon's own
-    // sentence, forwarded verbatim by location-service-api#89:
-    //
-    //   400 "Traffic is not supported for style."
-    //   400 "light is not a supported color scheme for style Standard."
-    //
-    // This used to throw `Failed to fetch map style: 400`, discarding all of it
-    // two lines before anyone could read it — the same defect #89 fixed in the
-    // API, one layer up. Reuses parseErrorResponse so a style failure arrives as
-    // the same LocationServiceException as every other call in this package,
-    // with `code`, `statusCode` and `requestId` intact.
-    throw parseErrorResponse(
-      response.status,
-      response.statusText,
-      await response.text(),
-      response.headers,
+  // `Bearer undefined` used to go out here, and came back as a 401 the caller
+  // had to work backwards from — a whole round trip for a request that was
+  // never going to succeed (#37).
+  if (!token) {
+    throw noTokenAvailable(
+      'getToken() returned nothing, so no style request was sent. Check the token provider has finished initialising.',
     )
   }
 
-  const style = (await response.json()) as StyleSpecification
+  // Through the shared transport, not a bare fetch: this gets the same
+  // per-attempt timeout, overall budget, cancellation and retry as every other
+  // call in the package, and the same error type on the way out. It also keeps
+  // the API's own message, which is the whole point of reading the body — for
+  // a style request that sentence is Amazon's, forwarded verbatim by
+  // location-service-api#89:
+  //
+  //   400 "Traffic is not supported for style."
+  //   400 "light is not a supported color scheme for style Standard."
+  //
+  // This used to throw `Failed to fetch map style: 400`, discarding all of it
+  // two lines before anyone could read it — the same defect #89 fixed in the
+  // API, one layer up.
+  const style = await requestJson<StyleSpecification>(
+    url,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+      },
+    },
+    request,
+  )
 
   if (language) {
     applyLanguageToDescriptor(style, language)
