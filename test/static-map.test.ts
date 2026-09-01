@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { LocationServiceException } from '../src/errors/LocationServiceException'
 import {
   buildStaticMapUrl,
   fetchStaticMap,
@@ -208,5 +209,79 @@ describe('fetchStaticMap', () => {
     await expect(
       fetchStaticMap(API, { width: 0, height: 0, center: [1, 2] }, token),
     ).rejects.toThrow(/width.*height.*required/i)
+  })
+
+  /**
+   * This was a bare `fetch` too: no timeout, no retry, no signal, and
+   * `Bearer undefined` when the token source had nothing to give (#37).
+   */
+  it('refuses without a token rather than sending Bearer undefined', async () => {
+    const spy = vi.fn()
+    vi.stubGlobal('fetch', spy)
+
+    const err = await fetchStaticMap(
+      API,
+      { width: 640, height: 400, center: [1, 2] },
+      () => undefined,
+    ).catch((e: unknown) => e as LocationServiceException)
+
+    expect(err).toBeInstanceOf(LocationServiceException)
+    expect(err.code).toBe('InvalidCredentialsException')
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it('retries a 503 and returns the render it eventually gets', async () => {
+    const spy = vi
+      .fn()
+      .mockImplementationOnce(
+        async () =>
+          new Response(JSON.stringify({ message: 'later' }), { status: 503 }),
+      )
+      .mockImplementationOnce(
+        async () => new Response(new Blob(['png-bytes']), { status: 200 }),
+      )
+    vi.stubGlobal('fetch', spy)
+
+    const blob = await fetchStaticMap(
+      API,
+      { width: 640, height: 400, center: [1, 2] },
+      token,
+    )
+    expect(await blob.text()).toBe('png-bytes')
+    expect(spy).toHaveBeenCalledTimes(2)
+  })
+
+  it('reports a network fault as NetworkException, not a raw TypeError', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockRejectedValue(new TypeError('fetch failed')),
+    )
+
+    const err = await fetchStaticMap(
+      API,
+      { width: 640, height: 400, center: [1, 2] },
+      token,
+      { retry: false },
+    ).catch((e: unknown) => e as LocationServiceException)
+
+    expect(err).toBeInstanceOf(LocationServiceException)
+    expect(err.code).toBe('NetworkException')
+  })
+
+  it('is cancellable, like every other call', async () => {
+    const spy = vi.fn()
+    vi.stubGlobal('fetch', spy)
+    const controller = new AbortController()
+    controller.abort()
+
+    const err = await fetchStaticMap(
+      API,
+      { width: 640, height: 400, center: [1, 2] },
+      token,
+      { signal: controller.signal },
+    ).catch((e: unknown) => e as LocationServiceException)
+
+    expect(err.code).toBe('AbortedException')
+    expect(spy).not.toHaveBeenCalled()
   })
 })

@@ -226,8 +226,56 @@ token already in hand, and a token the API stops accepting **before** its `exp`
 the refresh buffer elapses. `refreshToken` is awaited after a 401, and the
 request is retried **once** with what it returns. Return the same token, or
 nothing, and no retry is sent — a request that is going to fail again is not
-worth being billed for twice. A 403 is never retried: a new token cannot fix an
+worth a second round trip. A 403 is never retried: a new token cannot fix an
 `Origin` the application does not allow.
+
+#### Request options
+
+Every call in this package takes the same options object — `client.send`,
+`connector.send`, `fetchMapStyle` and `fetchStaticMap` — and every failure
+arrives as a `LocationServiceException`.
+
+```typescript
+await client.send(command, {
+  signal, // AbortSignal — cancels mid-flight AND mid-backoff
+  timeoutMs: 10_000, // per ATTEMPT
+  overallTimeoutMs: 30_000, // the whole call, waits between attempts included
+  retry: { maxAttempts: 3 }, // or `false` for none
+})
+```
+
+`overallTimeoutMs` is the one worth setting deliberately, and it defaults to
+30 s. `timeoutMs` bounds an attempt, not a call: the API answers a spent quota
+with `Retry-After: 60`, and honouring that literally across two retries blocked
+the caller for about two minutes — past any Lambda budget. Now no attempt gets
+more time than the call has left, and a retry that would have to wait longer
+than the remaining budget is not made at all. You get the API's own error back
+instead, `retryAfterMs` intact, so you can queue the work rather than guess.
+
+The map helpers take them as a trailing argument:
+
+```typescript
+const style = await fetchMapStyle(
+  apiUrl,
+  'Standard',
+  getToken,
+  { language: 'fr' },
+  { signal },
+)
+const blob = await fetchStaticMap(
+  apiUrl,
+  { width: 640, height: 400, center },
+  getToken,
+  { signal },
+)
+```
+
+**A call with no token is refused locally rather than sent.** Every path that
+builds an `Authorization` header checks first, so a token source that has not
+produced one yet raises `InvalidCredentialsException` instead of putting
+`Bearer undefined` on the wire — which could only ever come back a 401, a round
+trip spent to be told what you already know. `GeoPlacesClient` asks `refreshToken` first, so a
+client whose token simply has not arrived yet still works.
 
 #### GeoPlaces Adapter
 

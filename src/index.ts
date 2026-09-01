@@ -2,8 +2,12 @@
 export { GeoPlacesClient } from './client/GeoPlacesClient.js'
 export type { SendOptions } from './client/GeoPlacesClient.js'
 
-// Transport options — cancellation, per-attempt timeout, retry policy
-export { DEFAULT_MAX_ATTEMPTS, DEFAULT_TIMEOUT_MS } from './transport/http.js'
+// Transport options — cancellation, per-attempt timeout, overall budget, retry
+export {
+  DEFAULT_MAX_ATTEMPTS,
+  DEFAULT_OVERALL_TIMEOUT_MS,
+  DEFAULT_TIMEOUT_MS,
+} from './transport/http.js'
 export type { RequestOptions } from './transport/http.js'
 
 // Token refresh policy — shared by the server provider and the React provider

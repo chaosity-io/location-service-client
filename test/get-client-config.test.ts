@@ -58,13 +58,14 @@ let saved: Record<string, string | undefined>
  */
 const load = async () => {
   vi.resetModules()
-  const [{ getClientConfig }, { LocationServiceException }] = await Promise.all(
-    [
-      import('../src/server/getClientConfig'),
-      import('../src/errors/LocationServiceException'),
-    ],
-  )
-  return { getClientConfig, LocationServiceException }
+  const [
+    { getClientConfig, MAX_CACHED_PROVIDERS },
+    { LocationServiceException },
+  ] = await Promise.all([
+    import('../src/server/getClientConfig'),
+    import('../src/errors/LocationServiceException'),
+  ])
+  return { getClientConfig, MAX_CACHED_PROVIDERS, LocationServiceException }
 }
 
 beforeEach(() => {
@@ -324,5 +325,52 @@ describe('the return value stays plain data', () => {
       Object.values(config).some((value) => typeof value === 'function'),
     ).toBe(false)
     expect(JSON.parse(JSON.stringify(config))).toEqual(config)
+  })
+})
+
+describe('the cache holds one provider per application, not one in total (#39)', () => {
+  const app = (n: number) => ({
+    apiUrl: 'https://api.test',
+    clientId: `id-${n}`,
+    clientSecret: 's',
+  })
+
+  it('serves alternating applications from cache instead of re-minting each time', async () => {
+    // Two module-level variables held ONE provider, so the slot was evicted on
+    // every alternation: A→B→A→B meant four /auth/token round trips, four jti
+    // rows, all against the one shared token-endpoint throttle. For a process
+    // serving two applications — or an agency serving many — the hit rate was
+    // 0%. No token ever crossed tenants (each caller closes over the provider
+    // it asked for), so what this costs is availability and money.
+    const { getClientConfig } = await load()
+
+    await getClientConfig(app(1))
+    await getClientConfig(app(2))
+    await getClientConfig(app(1))
+    await getClientConfig(app(2))
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('stays bounded, and evicts the least recently used rather than the oldest', async () => {
+    const { getClientConfig, MAX_CACHED_PROVIDERS } = await load()
+
+    // Fill it exactly, then touch the first application again so it is the
+    // most recently used and app(1) is the coldest.
+    for (let n = 0; n < MAX_CACHED_PROVIDERS; n++) await getClientConfig(app(n))
+    await getClientConfig(app(0))
+    expect(fetchMock).toHaveBeenCalledTimes(MAX_CACHED_PROVIDERS)
+
+    // One more application pushes the cache over its bound.
+    await getClientConfig(app(MAX_CACHED_PROVIDERS))
+    expect(fetchMock).toHaveBeenCalledTimes(MAX_CACHED_PROVIDERS + 1)
+
+    // The one that was touched survived...
+    await getClientConfig(app(0))
+    expect(fetchMock).toHaveBeenCalledTimes(MAX_CACHED_PROVIDERS + 1)
+
+    // ...and the coldest one is the one that was dropped.
+    await getClientConfig(app(1))
+    expect(fetchMock).toHaveBeenCalledTimes(MAX_CACHED_PROVIDERS + 2)
   })
 })

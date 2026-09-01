@@ -647,8 +647,8 @@ describe('a 401 is retried exactly once, with a fresh token (#36)', () => {
   })
 
   it('does NOT retry a static token — the second request would be identical', async () => {
-    // And billed. A fixed string cannot be refreshed, so there is nothing to
-    // retry WITH.
+    // And pointless. A fixed string cannot be refreshed, so there is nothing
+    // to retry WITH.
     const { LocationServiceConnector } = await load()
     fetchMock.mockImplementation(async () => unauthorized())
 

@@ -12,7 +12,7 @@ import { GeoPlacesClient } from '../src/client/GeoPlacesClient'
  * rotated, before its `exp`: every request 401'd until the 60 s refresh buffer
  * elapsed on its own. `refreshToken` is the async escape hatch, and the guard
  * that matters is the one that DOESN'T retry, because a repeat of a doomed
- * request is a second billed request.
+ * request is a second round trip for the same answer.
  */
 
 const API = 'https://api.test'
@@ -199,5 +199,75 @@ describe('and NOT retried when there is nothing new to send', () => {
     const bodies = fetchMock.mock.calls.map(([, init]) => JSON.parse(init.body))
     expect(bodies[0].BiasPosition).toEqual([151.215, -33.857])
     expect(bodies[1].BiasPosition).toEqual([151.21537, -33.85681])
+  })
+})
+
+describe('a client with no token at all never sends Bearer undefined (#37)', () => {
+  /**
+   * The 401 self-heal above cannot cover this: it needs a request to have been
+   * REJECTED first. So a client whose token source has not produced one yet
+   * spent a whole round trip on `Authorization: Bearer undefined`, to be told
+   * something it already knew.
+   */
+  it('refuses rather than sending, when nothing can supply a token', async () => {
+    const client = new GeoPlacesClient({ apiUrl: API })
+
+    const err = await client
+      .send(new SearchTextCommand({ QueryText: 'x' }))
+      .catch((e) => e)
+
+    expect(err.code).toBe('InvalidCredentialsException')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('asks refreshToken first, and sends once it has one', async () => {
+    // The provider case: `getToken` is synchronous and has nothing yet, but the
+    // async source can mint one. That is a request worth making.
+    const refreshToken = vi.fn().mockResolvedValue('minted')
+    const client = new GeoPlacesClient({
+      apiUrl: API,
+      getToken: () => undefined,
+      refreshToken,
+    })
+
+    await expect(
+      client.send(new SearchTextCommand({ QueryText: 'x' })),
+    ).resolves.toEqual({ ResultItems: [] })
+
+    expect(refreshToken).toHaveBeenCalledTimes(1)
+    expect(authHeaders()).toEqual(['Bearer minted'])
+  })
+
+  it('treats an empty getToken the same as an absent one', async () => {
+    // `??` let `''` through the coalesce and then failed the check below it, so
+    // `getToken: () => undefined` reached refreshToken and `getToken: () => ''`
+    // did not. Nobody means to draw that distinction.
+    const refreshToken = vi.fn().mockResolvedValue('minted')
+    const client = new GeoPlacesClient({
+      apiUrl: API,
+      getToken: () => '',
+      refreshToken,
+    })
+
+    await expect(
+      client.send(new SearchTextCommand({ QueryText: 'x' })),
+    ).resolves.toEqual({ ResultItems: [] })
+
+    expect(refreshToken).toHaveBeenCalledTimes(1)
+    expect(authHeaders()).toEqual(['Bearer minted'])
+  })
+
+  it('refuses when refreshToken cannot supply one either', async () => {
+    const client = new GeoPlacesClient({
+      apiUrl: API,
+      refreshToken: async () => undefined,
+    })
+
+    const err = await client
+      .send(new SearchTextCommand({ QueryText: 'x' }))
+      .catch((e) => e)
+
+    expect(err.code).toBe('InvalidCredentialsException')
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })

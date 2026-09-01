@@ -1,4 +1,6 @@
-import { parseErrorResponse } from '../transport/errors.js'
+import { noTokenAvailable } from '../transport/errors.js'
+import type { RequestOptions } from '../transport/http.js'
+import { requestBlob } from '../transport/http.js'
 import type {
   ColorScheme,
   LabelSize,
@@ -143,6 +145,7 @@ export function buildStaticMapUrl(
  * @param apiUrl   Base URL of the Location Service API
  * @param options  Render options; exactly one of center / boundingBox / boundedPositions
  * @param getToken Callback returning the current auth token
+ * @param request  Transport options: `signal` to cancel, `timeoutMs`, `overallTimeoutMs`, `retry`
  *
  * @example
  * const blob = await fetchStaticMap(API_URL, {
@@ -155,25 +158,31 @@ export async function fetchStaticMap(
   apiUrl: string,
   options: StaticMapOptions,
   getToken: () => string | undefined,
+  request: RequestOptions = {},
 ): Promise<Blob> {
-  const response = await fetch(buildStaticMapUrl(apiUrl, options), {
-    headers: {
-      Authorization: `Bearer ${getToken()}`,
-      Accept: staticMapAccept(options.style),
-    },
-  })
-
-  if (!response.ok) {
-    // Same treatment as fetchMapStyle: the API's {message, code, requestId} is
-    // the useful part, and a bare "failed: 400" throws it away. The messages
-    // here are specific and actionable -- "'width' and 'height' are required",
-    // "Only one of center, bounding-box or bounded-positions may be set".
-    throw parseErrorResponse(
-      response.status,
-      response.statusText,
-      await response.text(),
+  const token = getToken()
+  // The same guard as fetchMapStyle and the server connector: a render is not
+  // worth requesting without a token to send (#37).
+  if (!token) {
+    throw noTokenAvailable(
+      'getToken() returned nothing, so no static map was requested. Check the token provider has finished initialising.',
     )
   }
 
-  return response.blob()
+  // Through the shared transport, so a static map gets the timeout, budget,
+  // cancellation and retry every other call has -- and its failures arrive as
+  // LocationServiceException rather than as a raw TypeError. The API's own
+  // {message, code, requestId} survives, which matters here: the messages are
+  // specific and actionable -- "'width' and 'height' are required", "Only one
+  // of center, bounding-box or bounded-positions may be set".
+  return requestBlob(
+    buildStaticMapUrl(apiUrl, options),
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: staticMapAccept(options.style),
+      },
+    },
+    request,
+  )
 }
