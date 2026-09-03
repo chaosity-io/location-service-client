@@ -14,7 +14,7 @@ working, and swaps SigV4 for this service's own bearer-token auth.
 ```bash
 npm run build       # tsc (ESM) + tsc -p tsconfig.cjs.json (CJS) + the CJS marker
 npm run dev         # tsc --watch
-npm test            # vitest run — 269 tests across 11 files
+npm test            # vitest run
 npm run test:watch  # vitest interactive
 npm run smoke       # loads dist/ as ESM and as CJS — run it after build
 npm run lint        # eslint . AND prettier --check .
