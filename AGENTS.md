@@ -209,6 +209,28 @@ working around them.
   the body INSIDE the loop — `requestJson` and `requestBlob` pass a reader in
   for exactly that reason — or a malformed body stops being a retryable attempt
   and becomes a raw `SyntaxError`.
+- **A data request body is the caller's command input, unchanged.** Both send
+  paths do `JSON.stringify(cmd.input)` and nothing else — no rounding, no
+  injected claim, no dropped field. This library spent several versions
+  rounding `BiasPosition` onto a grid sized by a `biasDecimals` token claim, so
+  that nearby callers shared a server-side cache entry. When that cache went
+  away the API stopped issuing the claim, but the rounding stayed and fell back
+  to its 3 dp default — so every caller was flattened onto a ~111 m grid, which
+  displaces a coordinate by up to ~70 m depending where in its cell it falls.
+  Measured, that is enough to return a different set of places rather than a
+  coarser one, and only through this SDK (#51). The two guards in
+  `test/bias-precision.test.ts` read `src/` rather than a list of transports,
+  because the author they exist to catch is the one who has not read this
+  paragraph. The first finds every `body` in a request-init position — a
+  property, or hoisted to a variable and passed as shorthand, reassignments
+  included — resolves it, and requires `JSON.stringify(cmd.input)`; anything
+  else needs an entry in its `NOT_A_DATA_BODY` list with a reason, and each
+  entry is asserted to still exist. The second requires every
+  `readAppConfigClaims` call to sit inside a `getAppConfig`, counting method
+  shorthand, arrow properties, getters and plain functions as scopes. Both
+  assert they still found something, so a rename cannot empty them into a
+  green pass. Token claims are for DISPLAY — the moment one shapes a request,
+  it is a stale snapshot deciding something the API already knows better.
 - **`timeoutMs` bounds an attempt; `overallTimeoutMs` bounds the call.** The
   gap between those two is where a caller's deadline used to disappear: the API
   answers a spent quota with `Retry-After: 60`, honoured literally twice, so a
