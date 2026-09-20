@@ -5,7 +5,6 @@ import { isTokenRejected, noTokenAvailable } from '../transport/errors.js'
 import type { RequestOptions } from '../transport/http.js'
 import { requestJson } from '../transport/http.js'
 import type { GeoPlacesCommand } from '../types/index.js'
-import { roundPositionFields } from '../utils/roundPosition.js'
 import type { AppConfigClaims } from '../utils/tokenClaims.js'
 import { readAppConfigClaims } from '../utils/tokenClaims.js'
 import { resolveApiUrl, serverTokenSource } from './getClientConfig.js'
@@ -233,7 +232,7 @@ export class LocationServiceConnector {
 
   /**
    * This application's own configuration, as carried on the access token
-   * (api#65) — bias precision, and the countries it is scoped to.
+   * (api#65) — today, the countries it is scoped to.
    *
    * Provided so an application can SHOW its own settings: populate a country
    * selector with the markets it actually serves, label a settings screen, and
@@ -311,13 +310,12 @@ export class LocationServiceConnector {
     cmd: GeoPlacesCommand,
     options?: SendOptions,
   ): Promise<TOutput> {
-    // The token is resolved before the request is shaped, so the precision this
-    // application is entitled to is available (api#65). Absent claim -> the
-    // 3 dp floor, which is what every application gets until one is configured
-    // otherwise. Recomputed per attempt because a refreshed token may carry
-    // different claims.
-    const { biasDecimals } = readAppConfigClaims(token)
-    const input = roundPositionFields(cmd.input, biasDecimals)
+    // The caller's input goes out as the caller wrote it — nothing in the body
+    // is derived from the token any more. `BiasPosition` used to be rounded
+    // here to a grid sized by a token claim, so nearby callers shared a server
+    // cache entry; with no cache the rounding only lowered the precision the
+    // upstream geocoder had to work with, which moves the results rather than
+    // coarsening them (#51).
 
     // Every system header is set exactly ONCE, and the caller's own spelling of
     // each is dropped first.
@@ -346,7 +344,7 @@ export class LocationServiceConnector {
     log('Sending %s request to %s', cmd.constructor?.name, url)
     return requestJson<TOutput>(
       url,
-      { method: 'POST', headers, body: JSON.stringify(input) },
+      { method: 'POST', headers, body: JSON.stringify(cmd.input) },
       options,
     )
   }

@@ -1,30 +1,28 @@
 /**
  * Read advisory application config out of the access token (api#65).
  *
- * The API puts an application's own settings — `biasDecimals`, `countries` —
- * into the JWT alongside `allowedDomain` and `allowedResources`, so this
- * library can stop hard-coding values it has no other way of knowing.
+ * The API puts an application's own settings — today just `countries` — into
+ * the JWT alongside `allowedDomain` and `allowedResources`, so this library can
+ * stop hard-coding values it has no other way of knowing.
+ *
+ * `biasDecimals` used to be here too. It sized the grid this library rounded
+ * `BiasPosition` onto, so that nearby callers shared a server cache entry; the
+ * cache is gone, the API issues no such claim, and rounding a coordinate with
+ * nothing to share it with only lowered the precision the upstream geocoder
+ * received (#51).
  *
  * DELIBERATELY UNVERIFIED, and that is safe. This library has no signing key
  * and does not need one: every claim here is re-read from the application row
  * by the API on each request, and the API's answer is the one that counts. A
  * forged token would fail at the authorizer long before any of this mattered.
- * What is read here only decides how the request is SHAPED — a hint, never a
- * permission.
+ * Nothing read here reaches a request at all now — it is displayed, never
+ * acted on, so a forged value misinforms only the caller who forged it.
  *
  * A JWT is signed, not encrypted, so the payload is plain base64url. Nothing
  * secret is in it; these are the caller's own settings.
  */
 
 export interface AppConfigClaims {
-  /**
-   * Bias precision this application is entitled to.
-   *
-   * Safe to act on: it only changes how a coordinate is rounded before
-   * sending, and the server re-rounds to its own configured value anyway. A
-   * stale value here costs precision, never correctness.
-   */
-  biasDecimals?: number
   /**
    * Countries this application may search, ISO 3166-1 alpha-2.
    *
@@ -74,15 +72,6 @@ export function readAppConfigClaims(token?: string | null): AppConfigClaims {
     const payload = JSON.parse(json) as Record<string, unknown>
 
     const claims: AppConfigClaims = {}
-    if (typeof payload.biasDecimals === 'number') {
-      claims.biasDecimals = payload.biasDecimals
-    } else if (
-      typeof payload.biasDecimals === 'string' &&
-      payload.biasDecimals.trim() !== ''
-    ) {
-      const n = Number(payload.biasDecimals)
-      if (Number.isFinite(n)) claims.biasDecimals = n
-    }
     if (Array.isArray(payload.countries)) {
       const list = payload.countries.filter(
         (c): c is string => typeof c === 'string',

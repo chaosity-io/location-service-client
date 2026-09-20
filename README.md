@@ -485,17 +485,30 @@ const connector = new LocationServiceConnector({
 })
 ```
 
-## Cache-Friendly Position Rounding
+## Coordinates Are Sent As You Supply Them
 
-`BiasPosition` coordinates are automatically rounded before each API request, to
-whatever precision your application is entitled to — a `biasDecimals` claim on
-the access token, defaulting to **3 decimal places** (~110 m) when the token
-carries none. This maximizes cache hits across nearby users without affecting
-result quality — bias is approximate by nature.
+Both `GeoPlacesClient` and `LocationServiceConnector` put your command input on
+the wire unchanged. `BiasPosition` and `QueryPosition` arrive at the service at
+the precision you passed.
 
-`QueryPosition` (reverse geocode) retains full precision since it represents an exact point the user selected.
+Earlier versions rounded `BiasPosition` to a grid — 3 decimal places by
+default — so that nearby callers could share a cached upstream answer. Requests
+are no longer cached, so the rounding had nothing left to share and only
+lowered the precision the geocoder worked from.
 
-This is handled transparently in both `GeoPlacesClient` and `LocationServiceConnector` — no action needed in application code.
+That is not a coarser result, it is a different one. A 3 dp grid moves a
+coordinate by up to ~70 m, depending where in its cell the coordinate falls,
+and the places a search returns change well inside that distance: measured
+against this service, a bias moved ~70 m returned a different set of nearby
+places, not the same set in a different order. If you were relying on the
+rounding to group nearby requests, round before you call.
+
+One coordinate is normalised: a static map's `center`, `bounding-box` and
+`bounded-positions` are rounded to six decimals — ~10 cm, below one pixel of a
+raster render. That is this library's choice, well inside what the service
+accepts: at most fourteen decimals per number, and at most 36 characters for
+the pair. A value straight from `map.getCenter()` carries fifteen or sixteen
+decimals and fails the first of those. A format rule, not a precision policy.
 
 ## Logging
 

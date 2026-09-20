@@ -173,20 +173,16 @@ describe('and NOT retried when there is nothing new to send', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
-  it('re-rounds the bias for the replacement token, whose claims may differ', async () => {
-    // biasDecimals is a claim ON the token, and the request body is shaped from
-    // it. A retry that reused the first attempt's body would send the old
-    // application's precision — a silent cache split, not an error.
-    const jwt = (claims: Record<string, unknown>) => {
-      const b64 = (o: unknown) =>
-        Buffer.from(JSON.stringify(o)).toString('base64url')
-      return `${b64({ alg: 'HS256' })}.${b64(claims)}.s`
-    }
+  it('retries with the same body, at the caller precision', async () => {
+    // This test used to prove the body was re-derived per attempt, because it
+    // was shaped from a token claim. Nothing in the body comes from the token
+    // any more (#51), so what matters is the other half: a retry must not be
+    // where the caller's coordinate quietly changes.
     rejectThenAccept()
     const client = new GeoPlacesClient({
       apiUrl: API,
-      token: jwt({ biasDecimals: 3 }),
-      refreshToken: async () => jwt({ biasDecimals: 5 }),
+      token: 'stale',
+      refreshToken: async () => 'fresh',
     })
 
     await client.send(
@@ -197,8 +193,10 @@ describe('and NOT retried when there is nothing new to send', () => {
     )
 
     const bodies = fetchMock.mock.calls.map(([, init]) => JSON.parse(init.body))
-    expect(bodies[0].BiasPosition).toEqual([151.215, -33.857])
-    expect(bodies[1].BiasPosition).toEqual([151.21537, -33.85681])
+    expect(bodies).toHaveLength(2)
+    for (const body of bodies) {
+      expect(body.BiasPosition).toEqual([151.21536789, -33.85681234])
+    }
   })
 })
 

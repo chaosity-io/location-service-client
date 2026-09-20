@@ -7,8 +7,8 @@ import { LocationServiceConnector } from '../src/server/LocationServiceConnector
  *
  * Three things here are easy to break without noticing: the Origin header the
  * API requires on every data request, the header precedence that stops a caller
- * overwriting Authorization, and the bias rounding that decides which cache
- * pool a request lands in (api#65). None of them fails loudly.
+ * overwriting Authorization, and the body reaching the wire exactly as the
+ * caller wrote it (#51). None of them fails loudly.
  */
 
 const jwt = (claims: Record<string, unknown> = {}) => {
@@ -206,27 +206,20 @@ describe('the request it builds', () => {
   })
 })
 
-describe('bias precision comes from the token (api#65)', () => {
-  it('rounds to the 3 dp floor when the token claims nothing', async () => {
+describe('the body is the caller input, untouched (#51)', () => {
+  it('sends BiasPosition at full precision', async () => {
+    // It used to be rounded onto a ~111 m grid so that nearby callers shared a
+    // server cache entry. There is no cache to share, and the displacement —
+    // up to ~70 m — is enough that the upstream geocoder returns a different
+    // set of places, not a coarser one. `test/bias-precision.test.ts` holds
+    // this for both transports; this is the server path's own guard.
     await connector().send(
       new SearchTextCommand({
         QueryText: 'x',
         BiasPosition: [151.21536789, -33.85681234],
       }),
     )
-    expect(sent().body.BiasPosition).toEqual([151.215, -33.857])
-  })
-
-  it('honours a higher precision the application is entitled to', async () => {
-    // Precision decides which cache pool the request lands in, so a wrong value
-    // is a silent cache split rather than an error.
-    await connector({ token: jwt({ biasDecimals: 5 }) }).send(
-      new SearchTextCommand({
-        QueryText: 'x',
-        BiasPosition: [151.21536789, -33.85681234],
-      }),
-    )
-    expect(sent().body.BiasPosition).toEqual([151.21537, -33.85681])
+    expect(sent().body.BiasPosition).toEqual([151.21536789, -33.85681234])
   })
 
   it('leaves a request without a position alone', async () => {
@@ -324,12 +317,9 @@ describe('exactly one Origin leaves, whatever the caller capitalised', () => {
 
 describe('getAppConfig reads the token, not the API', () => {
   it('returns the claims the token carries', async () => {
-    const c = connector({
-      token: jwt({ countries: ['AU', 'NZ'], biasDecimals: 4 }),
-    })
+    const c = connector({ token: jwt({ countries: ['AU', 'NZ'] }) })
     await expect(c.getAppConfig()).resolves.toEqual({
       countries: ['AU', 'NZ'],
-      biasDecimals: 4,
     })
     expect(fetchMock).not.toHaveBeenCalled()
   })
@@ -342,9 +332,11 @@ describe('getAppConfig reads the token, not the API', () => {
     // The URL is resolved when a request is about to go out, not when the token
     // source is built — demanding it up front made this throw on a connector
     // configured with nothing but a token.
-    const c = new LocationServiceConnector({ token: jwt({ biasDecimals: 4 }) })
+    const c = new LocationServiceConnector({
+      token: jwt({ countries: ['AU'] }),
+    })
 
-    await expect(c.getAppConfig()).resolves.toEqual({ biasDecimals: 4 })
+    await expect(c.getAppConfig()).resolves.toEqual({ countries: ['AU'] })
     expect(fetchMock).not.toHaveBeenCalled()
   })
 })
@@ -699,11 +691,12 @@ describe('a 401 is retried exactly once, with a fresh token (#36)', () => {
     expect(dataCalls()[1]![1].headers.Authorization).toBe(`Bearer ${fresh}`)
   })
 
-  it('re-rounds the bias for the replacement token, whose claims may differ', async () => {
-    // biasDecimals is a claim ON the token and the body is shaped from it, so a
-    // retry reusing the first attempt's body would send the old precision — a
-    // silent cache split, not an error. Mirrors the browser-path test in
-    // test/client-token-retry.test.ts.
+  it('retries with the same body, at the caller precision', async () => {
+    // This test used to prove the body was re-derived per attempt, because it
+    // was shaped from a token claim. Nothing in the body comes from the token
+    // any more (#51), so what matters is the other half: a retry must not be
+    // where the caller's coordinate quietly changes. Mirrors the browser-path
+    // test in test/client-token-retry.test.ts.
     const { LocationServiceConnector } = await load()
     let dataSeen = 0
     fetchMock.mockImplementation(async () => {
@@ -714,7 +707,7 @@ describe('a 401 is retried exactly once, with a fresh token (#36)', () => {
     await new LocationServiceConnector({
       apiUrl: 'https://api.test',
       getToken: async (forceRefresh) => ({
-        token: jwt({ biasDecimals: forceRefresh ? 5 : 3 }),
+        token: jwt({ seq: forceRefresh ? 2 : 1 }),
       }),
     }).send(
       new SearchTextCommand({
@@ -724,8 +717,10 @@ describe('a 401 is retried exactly once, with a fresh token (#36)', () => {
     )
 
     const bodies = dataCalls().map(([, init]) => JSON.parse(init.body))
-    expect(bodies[0].BiasPosition).toEqual([151.215, -33.857])
-    expect(bodies[1].BiasPosition).toEqual([151.21537, -33.85681])
+    expect(bodies).toHaveLength(2)
+    for (const body of bodies) {
+      expect(body.BiasPosition).toEqual([151.21536789, -33.85681234])
+    }
   })
 
   it('does NOT retry a 403 — a new token cannot fix an Origin or a Deny', async () => {
