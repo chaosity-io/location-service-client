@@ -261,12 +261,13 @@ await client.send(command, {
 ```
 
 `overallTimeoutMs` is the one worth setting deliberately, and it defaults to
-30 s. `timeoutMs` bounds an attempt, not a call: the API answers a spent quota
-with `Retry-After: 60`, and honouring that literally across two retries blocked
-the caller for about two minutes — past any Lambda budget. Now no attempt gets
-more time than the call has left, and a retry that would have to wait longer
-than the remaining budget is not made at all. You get the API's own error back
-instead, `retryAfterMs` intact, so you can queue the work rather than guess.
+30 s. `timeoutMs` bounds an attempt, not a call: nothing bounds the
+`Retry-After` a 429 carries, and honouring one of 60 s literally across two
+retries would have blocked the caller for about two minutes — past any Lambda
+budget. Now no attempt gets more time than the call has left, and a retry that
+would have to wait longer than the remaining budget is not made at all. You get
+the API's own error back instead, `retryAfterMs` intact, so you can queue the
+work rather than guess.
 
 The map helpers take them as a trailing argument:
 
