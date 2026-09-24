@@ -11,8 +11,8 @@ export const DEFAULT_TIMEOUT_MS = 10_000
  * Ceiling for the WHOLE call — every attempt plus every wait between them.
  *
  * `timeoutMs` bounds an attempt, not a call, and the gap between those two is
- * where the caller's own deadline disappears. The API answers a spent quota
- * with `Retry-After: 60`, which the retry loop honoured literally: two waits of
+ * where the caller's own deadline disappears. Nothing bounds the `Retry-After`
+ * a 429 carries, and the retry loop honoured one of 60 s literally: two waits of
  * a minute each, so one call could sit for ~120 s — past any Lambda budget,
  * past any HTTP gateway, and until now uncancellable (#37).
  *

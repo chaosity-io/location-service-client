@@ -249,15 +249,15 @@ working around them.
   green pass. Token claims are for DISPLAY — the moment one shapes a request,
   it is a stale snapshot deciding something the API already knows better.
 - **`timeoutMs` bounds an attempt; `overallTimeoutMs` bounds the call.** The
-  gap between those two is where a caller's deadline used to disappear: the API
-  answers a spent quota with `Retry-After: 60`, honoured literally twice, so a
-  30-second caller waited two minutes. A wait that would outlast the remaining
-  budget is not taken at all — the API's own error is thrown instead, with
-  `retryAfterMs` on it, which is more useful to the caller than a timeout. The
-  30 s default sits just under the old worst case (three default attempts that
-  all time out came to ~30.75 s), so the overlap is a ~0.75 s window in a third
-  attempt whose two predecessors both timed out — small, but not empty, which is
-  why it went out in a minor.
+  gap between those two is where a caller's deadline used to disappear: nothing
+  bounds the `Retry-After` a 429 carries, and one of 60 s would have been
+  honoured literally twice, so a 30-second caller would have waited two minutes.
+  A wait that would outlast the remaining budget is not taken at all — the
+  API's own error is thrown instead, with `retryAfterMs` on it, which is more
+  useful to the caller than a timeout. The 30 s default sits just under the old
+  worst case (three default attempts that all time out came to ~30.75 s), so
+  the overlap is a ~0.75 s window in a third attempt whose two predecessors
+  both timed out — small, but not empty, which is why it went out in a minor.
 - **Nothing sends `Bearer undefined`.** Five places in `src/` interpolate a
   token into an `Authorization` header, and every one of them checks first:
   `GeoPlacesClient` (which asks `refreshToken` before refusing, since the 401

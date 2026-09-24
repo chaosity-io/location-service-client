@@ -100,13 +100,16 @@ describe('retry policy', () => {
 
 describe('the call has a budget, not just each attempt (#37)', () => {
   /**
-   * `timeoutMs` bounds an attempt; nothing bounded the CALL. The API answers a
-   * spent quota with `Retry-After: 60`, which the loop honoured literally — two
-   * waits of a minute inside a request that had seconds to live.
+   * `timeoutMs` bounds an attempt; nothing bounded the CALL. Nothing bounds the
+   * `Retry-After` a 429 carries either, and the loop honoured one of 60 s
+   * literally — two waits of a minute inside a request that had seconds to live.
    */
   const throttled = (retryAfter: string) =>
     json(
-      { message: 'quota exceeded', code: 'ThrottlingException' },
+      {
+        message: 'Too many requests. Please try again later.',
+        code: 'ThrottlingException',
+      },
       { status: 429, headers: { 'retry-after': retryAfter } },
     )
 
