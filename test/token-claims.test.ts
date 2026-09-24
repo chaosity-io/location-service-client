@@ -29,10 +29,19 @@ describe('reading app config off the token', () => {
     expect(readAppConfigClaims(token)).toEqual({ countries: ['AU', 'NZ'] })
   })
 
-  it('returns nothing for a token carrying no app config', () => {
-    // The API omits these claims entirely when the application has none
-    // configured, which is every application without a country scope.
-    const token = tokenWith({ client_id: 'abc', allowedDomain: 'example.com' })
+  it('returns nothing for a token carrying only protocol claims', () => {
+    // Who the token is for and how long it lives are not application
+    // settings. `exp` has its own reader, readTokenExpiry.
+    const token = tokenWith({
+      client_id: 'abc',
+      sub: 'app-uuid',
+      scope: 'api:access',
+      aud: 'the-api',
+      iss: 'the-issuer',
+      iat: 1,
+      exp: 2,
+      jti: 'j',
+    })
     expect(readAppConfigClaims(token)).toEqual({})
   })
 
@@ -126,5 +135,101 @@ describe('the countries claim is exposed, never acted on', () => {
 
     expect(sent).toHaveLength(1)
     expect(sent[0]).not.toHaveProperty('Filter')
+  })
+})
+
+describe('allowedResources and allowedDomain are exposed, never acted on (#40)', () => {
+  // The API issues `allowedResources` JSON-ENCODED — a string holding a list —
+  // because it copies the application's row, which stores it that way. Read
+  // off a real token on 24 Sep 2026. A reader that only accepted an array
+  // would surface nothing from any token the API actually issues.
+  const RESOURCES = [
+    'POST /address/autocomplete',
+    'GET /maps/static/{fileName}',
+  ]
+
+  it('reads allowedResources as the API issues it: a JSON-encoded list', () => {
+    const token = tokenWith({ allowedResources: JSON.stringify(RESOURCES) })
+    expect(readAppConfigClaims(token)).toEqual({ allowedResources: RESOURCES })
+  })
+
+  it('reads allowedResources given as a plain list too', () => {
+    const token = tokenWith({ allowedResources: RESOURCES })
+    expect(readAppConfigClaims(token)).toEqual({ allowedResources: RESOURCES })
+  })
+
+  it('keeps an empty list: an application entitled to nothing says so', () => {
+    const token = tokenWith({ allowedResources: '[]' })
+    expect(readAppConfigClaims(token)).toEqual({ allowedResources: [] })
+  })
+
+  it('reads allowedDomain', () => {
+    const token = tokenWith({ allowedDomain: 'app.example.com' })
+    expect(readAppConfigClaims(token)).toEqual({
+      allowedDomain: 'app.example.com',
+    })
+  })
+
+  it.each([
+    ['a string that is not JSON', { allowedResources: 'POST /x' }],
+    ['JSON that is not a list', { allowedResources: '{"a":1}' }],
+    ['a number', { allowedResources: 5 }],
+    ['an empty domain', { allowedDomain: '' }],
+    ['a domain that is not a string', { allowedDomain: 5 }],
+  ])('ignores %s', (_l, claims) => {
+    expect(readAppConfigClaims(tokenWith(claims))).toEqual({})
+  })
+
+  it('drops the non-string entries of a list', () => {
+    const token = tokenWith({ allowedResources: JSON.stringify(['GET /a', 1]) })
+    expect(readAppConfigClaims(token)).toEqual({ allowedResources: ['GET /a'] })
+  })
+
+  it('is surfaced by the browser client, beside countries', async () => {
+    const { GeoPlacesClient } = await import('../src/client/GeoPlacesClient')
+    const client = new GeoPlacesClient({
+      apiUrl: 'https://example.invalid',
+      token: tokenWith({
+        countries: ['AU'],
+        allowedDomain: 'app.example.com',
+        allowedResources: JSON.stringify(RESOURCES),
+      }),
+    })
+
+    expect(client.getAppConfig()).toEqual({
+      countries: ['AU'],
+      allowedDomain: 'app.example.com',
+      allowedResources: RESOURCES,
+    })
+  })
+
+  it('does NOT refuse a request for a route the token does not list', async () => {
+    // Display only, like countries. The token is up to fifteen minutes old and
+    // the API reads the entitlement fresh from the row on every request, so a
+    // route granted since the token was minted must still be asked for.
+    const sent: string[] = []
+    const original = globalThis.fetch
+    globalThis.fetch = (async (url: string) => {
+      sent.push(url)
+      return new Response(JSON.stringify({ ResultItems: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    }) as never
+    try {
+      const { GeoPlacesClient } = await import('../src/client/GeoPlacesClient')
+      const client = new GeoPlacesClient({
+        apiUrl: 'https://example.invalid',
+        token: tokenWith({
+          allowedResources: JSON.stringify(['POST /address/autocomplete']),
+        }),
+      })
+      const { SearchTextCommand } = await import('../src/index')
+      await client.send(new SearchTextCommand({ QueryText: 'cafe' }))
+    } finally {
+      globalThis.fetch = original
+    }
+
+    expect(sent).toEqual(['https://example.invalid/address/search/text'])
   })
 })

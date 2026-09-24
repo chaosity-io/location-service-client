@@ -1,9 +1,11 @@
 /**
  * Read advisory application config out of the access token (api#65).
  *
- * The API puts an application's own settings — today just `countries` — into
- * the JWT alongside `allowedDomain` and `allowedResources`, so this library can
- * stop hard-coding values it has no other way of knowing.
+ * The API puts an application's own settings into the JWT — `countries`,
+ * `allowedResources` and `allowedDomain` — so this library can stop
+ * hard-coding values it has no other way of knowing. The last two were in the
+ * token all along and were not surfaced until #40, so an application could
+ * only learn it lacked a route from the 403.
  *
  * `biasDecimals` used to be here too. It sized the grid this library rounded
  * `BiasPosition` onto, so that nearby callers shared a server cache entry; the
@@ -43,6 +45,43 @@ export interface AppConfigClaims {
    * Sending nothing and letting the API scope the request is always correct.
    */
   countries?: string[]
+
+  /**
+   * The routes this application may call, as the API names them — method and
+   * route template, such as `POST /address/autocomplete` or
+   * `GET /maps/static/{fileName}` (#40).
+   *
+   * So an application can ask "may I show a static map?" before it offers
+   * one, rather than only learning from the 403. The same rule as `countries`
+   * applies, for the same reason: show it, never refuse with it. A route
+   * granted since the token was minted is answered by the API, which reads the
+   * entitlement fresh on every request.
+   *
+   * The API issues this claim JSON-encoded — a string holding the list —
+   * because it copies the application's stored setting. Both forms are read.
+   */
+  allowedResources?: string[]
+
+  /**
+   * The domain this application's requests must come from (#40). A request
+   * whose `Origin` is neither this host nor one of its subdomains is refused
+   * 403, so this is what to show next to "Origin not allowed".
+   */
+  allowedDomain?: string
+}
+
+/** A list of strings, whether the claim carries it as a list or JSON-encoded. */
+function readStringList(value: unknown): string[] | undefined {
+  let list = value
+  if (typeof list === 'string') {
+    try {
+      list = JSON.parse(list)
+    } catch {
+      return undefined
+    }
+  }
+  if (!Array.isArray(list)) return undefined
+  return list.filter((v): v is string => typeof v === 'string')
 }
 
 /**
@@ -77,6 +116,13 @@ export function readAppConfigClaims(token?: string | null): AppConfigClaims {
         (c): c is string => typeof c === 'string',
       )
       if (list.length) claims.countries = list
+    }
+    // Kept when empty, unlike countries: no countries means "search the
+    // world", but no resources means an application entitled to nothing.
+    const resources = readStringList(payload.allowedResources)
+    if (resources) claims.allowedResources = resources
+    if (typeof payload.allowedDomain === 'string' && payload.allowedDomain) {
+      claims.allowedDomain = payload.allowedDomain
     }
     return claims
   } catch {

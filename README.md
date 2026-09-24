@@ -219,6 +219,22 @@ await client.send(command)
 
 When `getToken` is provided, it is called on every request so token updates are reflected without recreating the client.
 
+`client.getAppConfig()` — and `await connector.getAppConfig()` on the server —
+returns the application's own settings as its access token carries them:
+
+```typescript
+{
+  allowedResources?: string[] // e.g. 'GET /maps/static/{fileName}'
+  allowedDomain?: string // the domain its requests must come from
+  countries?: string[] // ISO 3166-1 alpha-2, once a scope is configured
+}
+```
+
+For display — "static maps are not in your plan", the domain to show beside an
+`Origin not allowed` 403 — never for refusing or shaping a request. The token
+can be up to fifteen minutes old, and the API reads all three fresh from the
+application on every request.
+
 `refreshToken` covers the case `getToken` cannot. `getToken` is synchronous —
 MapLibre's `transformRequest` requires that — so it can only ever return the
 token already in hand, and a token the API stops accepting **before** its `exp`
@@ -346,11 +362,20 @@ interface MapStyleOptions {
   politicalView?: string // ISO 3166-1 alpha-3 (e.g. 'IND', 'TUR')
   terrain?: 'Hillshade' | 'Terrain3D'
   buildings?: 'Buildings3D'
-  contourDensity?: 'Medium' // Only 'Medium' is supported by the AWS SDK
-  traffic?: 'All'
+  contourDensity?: 'High' | 'Low' | 'Medium'
+  traffic?: 'All' | 'Congestion'
   travelModes?: Array<'Truck' | 'Transit'>
+  poiDensity?: PoiDensity // 'Off' draws no points of interest
+  poiCategories?: StylePoiCategory[] // draw only these, e.g. ['FoodAndDrink']
 }
 ```
+
+Every accepted value is exported as an array (`POI_DENSITIES`,
+`STYLE_POI_CATEGORIES`, `TRAFFIC_MODES`, …) so a picker can be built from it.
+Values are case sensitive, and some combinations are the API's to refuse — for
+example `traffic: 'All'` on Satellite. There is no `language` here:
+`fetchMapStyle` takes `language` separately and applies it to the descriptor
+itself, because the service's style descriptor has no language parameter.
 
 #### applyMapLanguage
 
@@ -378,10 +403,12 @@ setAllPoiVisibility(map, false)
 
 #### Available Commands
 
-All AWS Location Service commands from `@aws-sdk/client-geo-places`:
+The Amazon Location Places commands, with the SDK's inputs minus the two
+fields below:
 
 ```typescript
 import {
+  AutocompleteCommand,
   SuggestCommand,
   GeocodeCommand,
   ReverseGeocodeCommand,
@@ -390,6 +417,15 @@ import {
   SearchNearbyCommand,
 } from '@chaosity/location-client'
 ```
+
+**Two SDK fields are not accepted: `IntendedUse` and `Key`.** The service
+removes both from every request — `IntendedUse` would choose the price bucket,
+and `Key` would bill an Amazon Location key that is not the service's — so the
+commands exported here are typed without them, and passing either is a compile
+error rather than a field that is sent and silently ignored. The exported
+`<Name>CommandInput` and `<Name>Request` types are narrowed the same way. At
+runtime nothing is removed: the request body is your input, unchanged, and a
+field cast past the type is stripped by the service all the same.
 
 #### Data Type Utilities
 

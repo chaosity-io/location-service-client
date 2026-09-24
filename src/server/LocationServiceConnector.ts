@@ -232,17 +232,19 @@ export class LocationServiceConnector {
 
   /**
    * This application's own configuration, as carried on the access token
-   * (api#65) — today, the countries it is scoped to.
+   * (api#65): the routes it may call, the domain its requests must come from,
+   * and the countries it is scoped to (#40).
    *
    * Provided so an application can SHOW its own settings: populate a country
    * selector with the markets it actually serves, label a settings screen, and
    * so on. Being a few minutes stale is cosmetic for that.
    *
    * It is not an entitlement check. See AppConfigClaims for why acting on
-   * `countries` client-side makes requests fail that would otherwise succeed.
+   * any of it client-side makes requests fail that would otherwise succeed.
    *
-   * Returns `{}` when the token carries no application config, which is the
-   * case until one is configured in the portal.
+   * Every token the API issues carries `allowedResources` and `allowedDomain`;
+   * `countries` only once a scope is configured in the portal. Returns `{}`
+   * for a token carrying none of them.
    */
   async getAppConfig(): Promise<AppConfigClaims> {
     return readAppConfigClaims(await this.source().get())

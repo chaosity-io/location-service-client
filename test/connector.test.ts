@@ -324,6 +324,23 @@ describe('getAppConfig reads the token, not the API', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  it('returns allowedResources and allowedDomain beside countries (#40)', async () => {
+    // allowedResources arrives JSON-encoded, as the API issues it.
+    const c = connector({
+      token: jwt({
+        countries: ['AU'],
+        allowedDomain: 'app.example.com',
+        allowedResources: JSON.stringify(['POST /address/search/text']),
+      }),
+    })
+    await expect(c.getAppConfig()).resolves.toEqual({
+      countries: ['AU'],
+      allowedDomain: 'app.example.com',
+      allowedResources: ['POST /address/search/text'],
+    })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('returns {} when the token carries no application config', async () => {
     await expect(connector().getAppConfig()).resolves.toEqual({})
   })

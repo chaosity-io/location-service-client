@@ -7,9 +7,11 @@ import {
   LABEL_SIZES,
   MAP_FEATURE_MODES,
   MAP_STYLES,
+  POI_DENSITIES,
   SCALE_BAR_UNITS,
   SPRITE_VARIANTS,
   STATIC_MAP_STYLES,
+  STYLE_POI_CATEGORIES,
   TERRAINS,
   TRAFFIC_MODES,
   TRAVEL_MODES,
@@ -49,6 +51,26 @@ describe('the accepted values, pinned', () => {
       ['Kilometers', 'KilometersMiles', 'Miles', 'MilesKilometers'],
     ],
     ['MAP_FEATURE_MODES', MAP_FEATURE_MODES, ['Disabled', 'Enabled']],
+    [
+      'POI_DENSITIES',
+      POI_DENSITIES,
+      ['Default', 'Dense', 'Off', 'Sparse', 'VeryDense', 'VerySparse'],
+    ],
+    [
+      'STYLE_POI_CATEGORIES',
+      STYLE_POI_CATEGORIES,
+      [
+        'Accommodations',
+        'BusinessAndServices',
+        'Entertainment',
+        'FacilitiesAndBuildings',
+        'FoodAndDrink',
+        'LeisureAndOutdoor',
+        'Shopping',
+        'SightsAndMuseums',
+        'Transportation',
+      ],
+    ],
   ])('%s', (_name, actual, expected) => {
     expect([...actual]).toEqual(expected)
   })
@@ -105,6 +127,8 @@ describe('every value is spelled the way the API demands', () => {
     [LABEL_SIZES],
     [SCALE_BAR_UNITS],
     [MAP_FEATURE_MODES],
+    [POI_DENSITIES],
+    [STYLE_POI_CATEGORIES],
   ])('starts every value with a capital, as Amazon spells them', (list) => {
     for (const v of list) expect(v[0]).toBe(v[0].toUpperCase())
   })
@@ -127,6 +151,25 @@ describe('the values reach the URL unchanged', () => {
     expect(url).toContain('traffic=Congestion')
     // A list goes over the wire comma-separated; the API checks each element.
     expect(decodeURIComponent(url)).toContain('travel-modes=Truck,Transit')
+  })
+
+  it('sends the points-of-interest options (#40)', () => {
+    const url = buildMapStyleUrl('https://api.example.com', 'Standard', {
+      poiDensity: 'Sparse',
+      poiCategories: ['FoodAndDrink', 'Shopping'],
+    })
+
+    expect(url).toContain('poi-density=Sparse')
+    expect(decodeURIComponent(url)).toContain(
+      'poi-categories=FoodAndDrink,Shopping',
+    )
+  })
+
+  it('omits an empty poi-categories list rather than sending a blank', () => {
+    const url = buildMapStyleUrl('https://api.example.com', 'Standard', {
+      poiCategories: [],
+    })
+    expect(url).toBe('https://api.example.com/maps/Standard/descriptor')
   })
 
   it('omits what was not asked for', () => {
