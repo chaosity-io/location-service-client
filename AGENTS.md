@@ -7,7 +7,9 @@ the things that are expensive to rediscover; `README.md` covers usage and
 `@chaosity/location-client` is a TypeScript client for the Chaosity Location
 Service, shaped to be AWS-Location-compatible: it re-exports the
 `@aws-sdk/client-geo-places` commands and types so existing AWS code keeps
-working, and swaps SigV4 for this service's own bearer-token auth.
+working — except that the seven Places commands refuse `IntendedUse` and `Key`,
+which the service strips (see Conventions, #40) — and swaps SigV4 for this
+service's own bearer-token auth.
 
 ## Commands
 
@@ -151,8 +153,8 @@ step, and `prepublishOnly` runs the build.
 
 Both carry known inaccuracies, tracked in **#8**: `ARCHITECTURE.md` documents
 `AuthHelper` / `AuthClient` classes that do not exist and names a package this
-library does not depend on; the README's command list omits `AutocompleteCommand`
-and advertises routing and tracking utilities this API does not proxy.
+library does not depend on; the README advertises routing and tracking
+utilities this API does not proxy.
 
 Verify against `src/` before relying on either, and prefer fixing them over
 working around them.
@@ -186,6 +188,21 @@ working around them.
   what they promise, asserts the two module systems expose the _same_ surface,
   and re-checks that nothing server-only leaks into the root. Everything else in
   the gate passed while the package was unloadable.
+- **The seven Places commands are this package's own, not the SDK's.** The
+  service strips `IntendedUse` and `Key` from every request, so
+  `src/client/commands.ts` subclasses each SDK command with a constructor that
+  takes the input without them, and the root exports those by name over the
+  `export *` (#40). Narrowing only the `…CommandInput` types would change
+  nothing a caller writes: the SDK's constructor references its own type.
+  They are subclasses of the SDK's, so `resolveEndpoint`'s `instanceof` matches,
+  and nothing is removed at runtime. `test/places-commands.test.ts` reads the
+  command list from the SDK itself and compiles against each one
+  (`test/typecheck.ts`), so a command the SDK adds fails there until it joins
+  the file. The same test parses every file in `src/` and fails a value import
+  or re-export of an SDK `…Command` anywhere but `commands.ts`,
+  `transport/endpoints.ts` (the `instanceof` base) and the root's shadowed
+  `export *`: use the narrowed classes. Narrowing is a type change a caller
+  can fail to compile against, so it ships in a MINOR.
 - The root re-exports both AWS barrels with `export *`, which no bundler can
   tree-shake: a consumer importing only a map helper still pays ~93 KB. Tracked
   in **#42** — prefer fixing it over adding another `export *`.

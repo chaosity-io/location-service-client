@@ -1,13 +1,8 @@
 import {
-  GeocodeCommand,
-  type GeocodeCommandInput,
   type GeocodeResponse,
   GetPlaceAdditionalFeature,
-  GetPlaceCommand,
   type GetPlaceResponse,
-  ReverseGeocodeCommand,
   type ReverseGeocodeResponse,
-  SuggestCommand,
   type SuggestResponse,
 } from '@aws-sdk/client-geo-places'
 import {
@@ -25,6 +20,15 @@ import type {
 } from '@maplibre/maplibre-gl-geocoder'
 import debug from 'debug'
 import type { Map } from 'maplibre-gl'
+import {
+  // The package's own narrowed commands, not the SDK's: an input typed with
+  // the SDK's would admit IntendedUse and Key, which the service strips (#40).
+  GeocodeCommand,
+  type GeocodeCommandInput,
+  GetPlaceCommand,
+  ReverseGeocodeCommand,
+  SuggestCommand,
+} from '../client/commands.js'
 import type { GeoPlacesClient } from '../client/GeoPlacesClient.js'
 
 const log = debug('location-client:geocoder')

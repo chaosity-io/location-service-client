@@ -74,6 +74,18 @@ export interface StaticMapOptions {
   scaleBarUnit?: ScaleBarUnit
   /** Defaults to `map`. */
   fileName?: StaticMapFileName
+
+  // The four below are forwarded by the API as they are sent, and until #40
+  // this type could not express them, so a caller needed a hand-built URL.
+
+  /** ISO 3166-1 alpha-3 country whose view of disputed borders to draw. */
+  politicalView?: string
+  /** Label language, a BCP-47 tag such as `fr` or `zh-Hant`. */
+  language?: string
+  /** Markers and lines in Amazon Location's compact overlay syntax. */
+  compactOverlay?: string
+  /** A GeoJSON FeatureCollection to draw, as JSON text. */
+  geoJsonOverlay?: string
 }
 
 /**

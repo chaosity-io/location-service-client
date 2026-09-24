@@ -23,6 +23,36 @@ export type { LocationServiceExceptionOptions } from './errors/LocationServiceEx
 // Re-export AWS SDK commands and types
 export * from '@aws-sdk/client-geo-places'
 
+// …except the seven Places commands and their inputs, which take neither
+// IntendedUse nor Key: the service strips both from every request (#40). A
+// named export wins over the `export *` above, as GeoPlacesClient's does.
+export {
+  AutocompleteCommand,
+  GeocodeCommand,
+  GetPlaceCommand,
+  ReverseGeocodeCommand,
+  SearchNearbyCommand,
+  SearchTextCommand,
+  SuggestCommand,
+} from './client/commands.js'
+export type {
+  AutocompleteCommandInput,
+  AutocompleteRequest,
+  GeocodeCommandInput,
+  GeocodeRequest,
+  GetPlaceCommandInput,
+  GetPlaceRequest,
+  NeverForwarded,
+  ReverseGeocodeCommandInput,
+  ReverseGeocodeRequest,
+  SearchNearbyCommandInput,
+  SearchNearbyRequest,
+  SearchTextCommandInput,
+  SearchTextRequest,
+  SuggestCommandInput,
+  SuggestRequest,
+} from './client/commands.js'
+
 // Re-export AWS Location Utilities (data type conversions)
 export * from '@aws/amazon-location-utilities-datatypes'
 
@@ -60,9 +90,11 @@ export {
   LABEL_SIZES,
   MAP_FEATURE_MODES,
   MAP_STYLES,
+  POI_DENSITIES,
   SCALE_BAR_UNITS,
   SPRITE_VARIANTS,
   STATIC_MAP_STYLES,
+  STYLE_POI_CATEGORIES,
   TERRAINS,
   TRAFFIC_MODES,
   TRAVEL_MODES,
@@ -74,9 +106,11 @@ export type {
   LabelSize,
   MapFeatureMode,
   MapStyle,
+  PoiDensity,
   ScaleBarUnit,
   SpriteVariant,
   StaticMapStyle,
+  StylePoiCategory,
   Terrain,
   TrafficMode,
   TravelMode,

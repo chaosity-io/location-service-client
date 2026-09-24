@@ -6,6 +6,7 @@ import {
   fetchStaticMap,
   staticMapAccept,
 } from '../src/maps/staticMap'
+import { typeErrors } from './typecheck'
 
 /**
  * The rule this file exists for: Accept must name the exact type, and the type
@@ -134,6 +135,55 @@ describe('buildStaticMapUrl', () => {
     expect(url.searchParams.get('crop-labels')).toBe('true')
     expect(url.searchParams.has('cropLabels')).toBe(false)
   })
+
+  it('sends the four options the API publishes that this type lacked (#40)', () => {
+    // Each under a spelling the API reads: its camelCase aliases, and
+    // `language` for lang. Before #40 none of them could be expressed here, so
+    // an overlay, a political view or a label language needed a hand-built URL.
+    const url = new URL(
+      buildStaticMapUrl(API, {
+        ...base,
+        center: [151.2, -33.8],
+        zoom: 12,
+        style: 'Standard',
+        politicalView: 'IND',
+        language: 'fr',
+        compactOverlay: 'point:151.2,-33.8;label=Sydney',
+        geoJsonOverlay: '{"type":"FeatureCollection","features":[]}',
+      }),
+    )
+
+    expect(url.searchParams.get('politicalView')).toBe('IND')
+    expect(url.searchParams.get('language')).toBe('fr')
+    expect(url.searchParams.get('compactOverlay')).toBe(
+      'point:151.2,-33.8;label=Sydney',
+    )
+    expect(url.searchParams.get('geoJsonOverlay')).toBe(
+      '{"type":"FeatureCollection","features":[]}',
+    )
+  })
+
+  it('types the four options, so a TypeScript caller can write them (#40)', () => {
+    // The URL test above passes whatever the type says: the builder forwards
+    // any key at runtime. What was missing is the TYPE — an excess-property
+    // error on each of these — so it is checked by compiling.
+    const source = [
+      `import type { StaticMapOptions } from '../src/index.js'`,
+      `const options: StaticMapOptions = {`,
+      `  width: 640,`,
+      `  height: 400,`,
+      `  center: [151.2, -33.8],`,
+      `  zoom: 12,`,
+      `  politicalView: 'IND',`,
+      `  language: 'fr',`,
+      `  compactOverlay: 'point:151.2,-33.8;label=Sydney',`,
+      `  geoJsonOverlay: '{"type":"FeatureCollection","features":[]}',`,
+      `}`,
+      `export { options }`,
+      '',
+    ].join('\n')
+    expect(typeErrors('__static-map-options__.ts', source)).toEqual([])
+  }, 60_000)
 
   it('omits absent options rather than sending "undefined"', () => {
     const url = new URL(buildStaticMapUrl(API, { ...base, center: [1, 2] }))

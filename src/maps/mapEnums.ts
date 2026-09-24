@@ -122,3 +122,43 @@ export type ScaleBarUnit = (typeof SCALE_BAR_UNITS)[number]
  */
 export const MAP_FEATURE_MODES = ['Disabled', 'Enabled'] as const
 export type MapFeatureMode = (typeof MAP_FEATURE_MODES)[number]
+
+/**
+ * How many points of interest the style descriptor draws (#40). `Off` removes
+ * the poi layers outright; the others thin them out or add more.
+ *
+ * Standard and Hybrid accept it; Monochrome and Satellite answer 400 naming
+ * the parameter, as they do for `STYLE_POI_CATEGORIES`. That is the API's rule
+ * to answer, like every combination rule above.
+ */
+export const POI_DENSITIES = [
+  'Default',
+  'Dense',
+  'Off',
+  'Sparse',
+  'VeryDense',
+  'VerySparse',
+] as const
+export type PoiDensity = (typeof POI_DENSITIES)[number]
+
+/**
+ * The categories of point of interest a style descriptor can be limited to
+ * (#40). Sent as a comma-separated list; only the named categories are drawn.
+ *
+ * Not `PoiCategory`: that name is already this package's type for
+ * `setPoiVisibility`'s layer groups, which hide categories on a map already
+ * loaded. This one asks the API for a descriptor that draws only these — the
+ * SDK's name qualified the way `TRAFFIC_MODES` and `SPRITE_VARIANTS` are.
+ */
+export const STYLE_POI_CATEGORIES = [
+  'Accommodations',
+  'BusinessAndServices',
+  'Entertainment',
+  'FacilitiesAndBuildings',
+  'FoodAndDrink',
+  'LeisureAndOutdoor',
+  'Shopping',
+  'SightsAndMuseums',
+  'Transportation',
+] as const
+export type StylePoiCategory = (typeof STYLE_POI_CATEGORIES)[number]

@@ -8,6 +8,8 @@ import type {
   ColorScheme,
   ContourDensity,
   MapStyle,
+  PoiDensity,
+  StylePoiCategory,
   Terrain,
   TrafficMode,
   TravelMode,
@@ -51,6 +53,16 @@ export interface MapStyleOptions {
   traffic?: TrafficMode
   /** Travel mode overlays for routing-specific features. */
   travelModes?: TravelMode[]
+  /**
+   * How many points of interest to draw; `Off` draws none. Standard and
+   * Hybrid only — Monochrome and Satellite answer 400.
+   */
+  poiDensity?: PoiDensity
+  /**
+   * Draw only these categories of point of interest. Standard and Hybrid
+   * only, like `poiDensity`.
+   */
+  poiCategories?: StylePoiCategory[]
 }
 
 /**
@@ -81,6 +93,9 @@ export function buildMapStyleUrl(
   if (options.traffic) params.set('traffic', options.traffic)
   if (options.travelModes?.length)
     params.set('travel-modes', options.travelModes.join(','))
+  if (options.poiDensity) params.set('poi-density', options.poiDensity)
+  if (options.poiCategories?.length)
+    params.set('poi-categories', options.poiCategories.join(','))
 
   const qs = params.toString()
   return `${apiUrl}/maps/${mapStyle}/descriptor${qs ? `?${qs}` : ''}`
