@@ -1,4 +1,6 @@
 import debug from 'debug'
+import type { VerifyAddressResponse } from '../client/commands.js'
+import { VerifyAddressCommand } from '../client/commands.js'
 import { LocationServiceException } from '../errors/LocationServiceException.js'
 import { resolveEndpoint } from '../transport/endpoints.js'
 import { isTokenRejected, noTokenAvailable } from '../transport/errors.js'
@@ -160,7 +162,13 @@ function explainMissingOrigin(
  * ```typescript
  * // Credentials and apiUrl from the environment, Origin supplied here
  * const connector = new LocationServiceConnector({ origin: 'https://app.example.com' })
- * const result = await connector.send(new SearchTextCommand({ QueryText: 'Space Needle' }))
+ * const result = await connector.send(
+ *   new SearchTextCommand({
+ *     QueryText: 'Space Needle',
+ *     // SearchText takes exactly one of BiasPosition, Filter.BoundingBox or Filter.Circle.
+ *     BiasPosition: [-122.3493, 47.6205],
+ *   }),
+ * )
  * ```
  */
 export class LocationServiceConnector {
@@ -276,6 +284,21 @@ export class LocationServiceConnector {
     } catch (err) {
       throw explainMissingOrigin(err, this.effectiveOrigin(options))
     }
+  }
+
+  /**
+   * Verify a PlaceId: `send(new VerifyAddressCommand({ PlaceId }))`, typed
+   * (#54). Resolves the full place record plus `verified`, and resolves a
+   * `verified: false` too — see VerifyAddressResponse for what may be stored.
+   *
+   * Billed per call, whether or not the address verifies: call it once per
+   * chosen PlaceId, never per keystroke.
+   */
+  verifyAddress(
+    placeId: string,
+    options?: SendOptions,
+  ): Promise<VerifyAddressResponse> {
+    return this.send(new VerifyAddressCommand({ PlaceId: placeId }), options)
   }
 
   private async dispatchWithRetry<TOutput>(

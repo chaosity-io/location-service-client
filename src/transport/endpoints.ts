@@ -7,6 +7,7 @@ import {
   SearchTextCommand,
   SuggestCommand,
 } from '@aws-sdk/client-geo-places'
+import { VerifyAddressCommand } from '../client/commands.js'
 import { LocationServiceException } from '../errors/LocationServiceException.js'
 import type { GeoPlacesCommand } from '../types/index.js'
 
@@ -29,6 +30,8 @@ const ENDPOINTS = new Map<CommandConstructor, string>([
   [SearchNearbyCommand, '/address/search/nearby'],
   [SearchTextCommand, '/address/search/text'],
   [SuggestCommand, '/address/suggestion'],
+  // This package's own: the route has no AWS command (#54).
+  [VerifyAddressCommand, '/address/verify'],
 ])
 
 export function resolveEndpoint(command: GeoPlacesCommand): string {

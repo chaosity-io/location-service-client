@@ -203,6 +203,15 @@ working around them.
   `transport/endpoints.ts` (the `instanceof` base) and the root's shadowed
   `export *`: use the narrowed classes. Narrowing is a type change a caller
   can fail to compile against, so it ships in a MINOR.
+- **`VerifyAddressCommand` is the one command with no SDK class** (#54):
+  `POST /address/verify` has no AWS command. It is registered in `ENDPOINTS`
+  like the others, and it extends nothing on purpose. `resolveEndpoint`
+  matches by `instanceof`, so a subclass of `GetPlaceCommand` would match
+  that entry first and go to `/address/place`. `verifyAddress` on both
+  clients is sugar over `send`. A route the service adds gets a command
+  first, so both transports, the 401 self-heal and the body guard cover it
+  with no second path. `test/verify-address.test.ts` fails any `…Command`
+  the root exports that does not resolve to a route.
 - The root re-exports both AWS barrels with `export *`, which no bundler can
   tree-shake: a consumer importing only a map helper still pays ~93 KB. Tracked
   in **#42** — prefer fixing it over adding another `export *`.

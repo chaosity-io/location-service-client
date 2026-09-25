@@ -29,6 +29,7 @@ export * from '@aws-sdk/client-geo-places'
 // …except the seven Places commands and their inputs, which take neither
 // IntendedUse nor Key: the service strips both from every request (#40). A
 // named export wins over the `export *` above, as GeoPlacesClient's does.
+// VerifyAddressCommand is this package's own: its route has no SDK command (#54).
 export {
   AutocompleteCommand,
   GeocodeCommand,
@@ -37,6 +38,7 @@ export {
   SearchNearbyCommand,
   SearchTextCommand,
   SuggestCommand,
+  VerifyAddressCommand,
 } from './client/commands.js'
 export type {
   AutocompleteCommandInput,
@@ -54,6 +56,8 @@ export type {
   SearchTextRequest,
   SuggestCommandInput,
   SuggestRequest,
+  VerifyAddressCommandInput,
+  VerifyAddressResponse,
 } from './client/commands.js'
 
 // Re-export AWS Location Utilities (data type conversions)

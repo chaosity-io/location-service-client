@@ -45,11 +45,12 @@ export interface ClientConfig {
 }
 
 /**
- * Minimal interface for AWS SDK command objects.
- * All AWS SDK commands (AutocompleteCommand, SearchTextCommand, etc.) extend
- * Smithy's Command base class which has an `input` property containing the
- * request parameters. This interface captures what we actually need from
- * commands without coupling to Smithy internals.
+ * Minimal interface for a command object: the AWS SDK's, and this package's
+ * own `VerifyAddressCommand` (#54). The SDK's commands (AutocompleteCommand,
+ * SearchTextCommand, etc.) extend Smithy's Command base class, which has an
+ * `input` property containing the request parameters; `VerifyAddressCommand`
+ * has the same `input` and nothing else. This interface captures what we
+ * actually need from commands without coupling to Smithy internals.
  */
 export interface GeoPlacesCommand {
   readonly input: object

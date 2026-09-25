@@ -28,7 +28,12 @@ function report() {
 
 /** A named export that must survive whatever the module plumbing does. */
 const EXPECTED = {
-  '.': ['GeoPlacesClient', 'createTransformRequest', 'SearchTextCommand'],
+  '.': [
+    'GeoPlacesClient',
+    'createTransformRequest',
+    'SearchTextCommand',
+    'VerifyAddressCommand',
+  ],
   './server': ['LocationServiceConnector', 'getClientConfig', 'TokenProvider'],
 }
 

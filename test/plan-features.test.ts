@@ -82,6 +82,8 @@ const OPTION_TYPES: Record<string, Record<string, Classification>> = {
     contact: RICH,
     timeZone: RICH,
   },
+  // Its own command, not an SDK input, so it is classified here (#54).
+  VerifyAddressCommandInput: { PlaceId: OPEN },
 }
 
 /** Exported object types that carry no request parameter, and why. */
@@ -97,6 +99,7 @@ const NOT_REQUEST_OPTIONS: Record<string, string> = {
     "the shape of a sendable command; its input is the command's own, classified under the Places commands below",
   MapLike: 'the slice of a MapLibre map applyMapLanguage touches; client-side',
   AppConfigClaims: 'read from the token for display; sends nothing',
+  VerifyAddressResponse: "the service's answer to a verify; sends nothing",
 }
 
 /** Every value of every exported `as const` list: its feature, or OPEN. */
@@ -323,7 +326,12 @@ const docText = (node: ts.Node): string =>
 const REFUSAL = /FeatureNotEntitledException|FEATURE_NOT_ENTITLED/
 
 describe('every tagged declaration explains the refusal where it is hovered', () => {
-  it.each(Object.keys(OPTION_TYPES))('%s', (typeName) => {
+  // An option type with no gated key carries no tag, and nothing to explain.
+  it.each(
+    Object.entries(OPTION_TYPES)
+      .filter(([, keys]) => Object.values(keys).some((c) => c !== OPEN))
+      .map(([name]) => name),
+  )('%s', (typeName) => {
     expect(docText(declOf(typeName))).toMatch(REFUSAL)
   })
 

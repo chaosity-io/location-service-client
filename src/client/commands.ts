@@ -1,4 +1,5 @@
 import type {
+  GetPlaceResponse,
   AutocompleteCommandInput as SdkAutocompleteCommandInput,
   AutocompleteRequest as SdkAutocompleteRequest,
   GeocodeCommandInput as SdkGeocodeCommandInput,
@@ -165,5 +166,69 @@ export type SuggestCommandInput = Omit<SdkSuggestCommandInput, NeverForwarded>
 export class SuggestCommand extends SdkSuggestCommand {
   constructor(input: SuggestCommandInput) {
     super(input)
+  }
+}
+
+/**
+ * A PlaceId, and nothing else: the service forwards `PlaceId` alone to this
+ * route, so `Language`, `PoliticalView` and `AdditionalFeatures` would be
+ * dropped rather than honoured. The type refuses them instead (#54).
+ */
+export interface VerifyAddressCommandInput {
+  /**
+   * From an autocomplete, suggestion, geocode or place result — including a
+   * unit's, from a place's `SecondaryAddresses`.
+   */
+  PlaceId: string
+}
+
+/**
+ * The answer to a verify: the record `GetPlaceCommand` returns — the
+ * building's units in `SecondaryAddresses` included, `$metadata` not — plus
+ * `verified`.
+ *
+ * `verified` is true for a `PointAddress`, or a `SecondaryAddress` (a unit),
+ * and false for anything else: an interpolated address, a street, a locality,
+ * a point of interest. A `false` is still a 200 and still billed, so it
+ * resolves; it never throws.
+ *
+ * This is the one Places result an integrator may store, except a place in
+ * Japan, which may not be stored at all. Every other Places result is for
+ * display.
+ *
+ * Keep the PlaceId you sent beside it. The answer's own `PlaceId` can differ,
+ * and for a unit it does: the service fails that one on every Places route,
+ * while the one you sent verifies again.
+ */
+export type VerifyAddressResponse = Omit<GetPlaceResponse, 'PricingBucket'> & {
+  /**
+   * The bucket the stored record belongs to (`Stored`), not what this call
+   * was billed at. Every verify is billed on its own meter, whether the
+   * service answered it from its store or not.
+   */
+  PricingBucket: string | undefined
+  /** `PointAddress` or `SecondaryAddress`: the address is verified. */
+  verified: boolean
+}
+
+/**
+ * `POST /address/verify` (#54): resolve one PlaceId to the full place record
+ * plus `verified`. `GeoPlacesClient.verifyAddress` and
+ * `LocationServiceConnector.verifyAddress` send this.
+ *
+ * Billed per call, whether or not the address verifies. Send it once per
+ * chosen PlaceId — at submit — never per keystroke. A repeat verify of the
+ * same PlaceId may be answered from the service's own store, and is billed
+ * all the same.
+ *
+ * Not an SDK command: the route has none. It extends nothing on purpose —
+ * `ENDPOINTS` matches by `instanceof`, so a subclass of `GetPlaceCommand`
+ * would match that entry and go to `/address/place`.
+ */
+export class VerifyAddressCommand {
+  readonly input: VerifyAddressCommandInput
+
+  constructor(input: VerifyAddressCommandInput) {
+    this.input = input
   }
 }
