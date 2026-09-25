@@ -42,6 +42,17 @@ import type {
 /** `map`, or `map@2x` for a retina render. There is no file extension. */
 export type StaticMapFileName = 'map' | 'map@2x'
 
+/**
+ * Render options for `buildStaticMapUrl` and `fetchStaticMap`.
+ *
+ * The options tagged `@planFeature` are PLAN FEATURES (#55): a Satellite
+ * `style` — which is also what an omitted `style` renders — needs `satellite`,
+ * and `politicalView` needs `political-view`. An application whose plan does
+ * not include one is refused 403 `FeatureNotEntitledException` —
+ * `isFeatureNotEntitled` on the error — and the message names the feature and
+ * the option. Every other option is open to every plan. Which plan includes
+ * which feature: https://chaosity.cloud/pricing.
+ */
 export interface StaticMapOptions {
   /** Pixels, 64-1500. */
   width: number
@@ -62,6 +73,16 @@ export interface StaticMapOptions {
   radius?: number
   padding?: number
   cropLabels?: boolean
+  /**
+   * `Standard` or `Satellite`. Omitted, the render is Satellite — the
+   * service's default — so pass `'Standard'` for a render every plan may
+   * request.
+   *
+   * Satellite is refused on a plan without it: 403
+   * `FeatureNotEntitledException` (see `FEATURE_NOT_ENTITLED`).
+   *
+   * @planFeature satellite — Satellite
+   */
   style?: StaticMapStyle
   colorScheme?: ColorScheme
   labelSize?: LabelSize
@@ -78,7 +99,14 @@ export interface StaticMapOptions {
   // The four below are forwarded by the API as they are sent, and until #40
   // this type could not express them, so a caller needed a hand-built URL.
 
-  /** ISO 3166-1 alpha-3 country whose view of disputed borders to draw. */
+  /**
+   * ISO 3166-1 alpha-3 country whose view of disputed borders to draw.
+   *
+   * Refused on a plan without it: 403 `FeatureNotEntitledException` (see
+   * `FEATURE_NOT_ENTITLED`).
+   *
+   * @planFeature political-view
+   */
   politicalView?: string
   /** Label language, a BCP-47 tag such as `fr` or `zh-Hant`. */
   language?: string
@@ -153,6 +181,10 @@ export function buildStaticMapUrl(
 
 /**
  * Fetch a static map as a Blob.
+ *
+ * A refused plan feature — a Satellite `style`, the default when none is
+ * given, or a `politicalView` — rejects with a `LocationServiceException`
+ * whose `isFeatureNotEntitled` is true, as `fetchMapStyle` does.
  *
  * @param apiUrl   Base URL of the Location Service API
  * @param options  Render options; exactly one of center / boundingBox / boundedPositions

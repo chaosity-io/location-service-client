@@ -57,15 +57,42 @@ const log = debug('location-client:geocoder')
  * Worth knowing before enabling `contact`: for a street address it costs
  * Advanced and returns no contact field at all — only points of interest carry
  * one. On an address-completion flow that is 3x the price for nothing.
+ *
+ * `access`, `contact` and `timeZone` are also RICH PLACE DATA, a feature of the
+ * application's plan (#55). On a plan without it, the lookup is refused 403
+ * `FeatureNotEntitledException` — `isFeatureNotEntitled` on the error — and
+ * nothing is returned or billed. `secondaryAddresses` is open to every plan.
+ * Which plans include it: https://chaosity.cloud/pricing.
  */
 export interface GeoPlacesDetailOptions {
-  /** Entrance/exit points. Moves the request to the Advanced bucket. */
+  /**
+   * Entrance/exit points. Moves the request to the Advanced bucket.
+   *
+   * Refused on a plan without it: 403 `FeatureNotEntitledException` (see
+   * `FEATURE_NOT_ENTITLED`).
+   *
+   * @planFeature rich place data
+   */
   access?: boolean
   /** Unit and sub-address detail. Stays in the Core bucket — free to enable. */
   secondaryAddresses?: boolean
-  /** Phone/website, POIs only. Moves the request to the Advanced bucket. */
+  /**
+   * Phone/website, POIs only. Moves the request to the Advanced bucket.
+   *
+   * Refused on a plan without it: 403 `FeatureNotEntitledException` (see
+   * `FEATURE_NOT_ENTITLED`).
+   *
+   * @planFeature rich place data
+   */
   contact?: boolean
-  /** IANA zone and offset. Moves the request to the Advanced bucket. */
+  /**
+   * IANA zone and offset. Moves the request to the Advanced bucket.
+   *
+   * Refused on a plan without it: 403 `FeatureNotEntitledException` (see
+   * `FEATURE_NOT_ENTITLED`).
+   *
+   * @planFeature rich place data
+   */
   timeZone?: boolean
 }
 

@@ -40,7 +40,7 @@ npm install maplibre-gl @maplibre/maplibre-gl-geocoder
 - **AWS SDK Commands**: Full access to all AWS Location Service commands
 - **Data Type Utilities**: Built-in GeoJSON conversion utilities
 - **MapLibre Integration**: Adapter for MapLibre GL Geocoder and `createTransformRequest` helper
-- **Map Style Control**: Fetch and customize map style descriptors with terrain, 3D buildings, traffic, and more
+- **Map Style Control**: Fetch and customize map style descriptors — color scheme, points of interest, label language, and terrain, 3D buildings, traffic and more as [plan features](#plan-features)
 - **Map Language**: Switch map label language client-side with zero API calls
 - **POI Layer Control**: Toggle point-of-interest categories on/off by layer
 - **Server Utilities**: `getClientConfig()` with auto-env detection and token caching
@@ -118,8 +118,6 @@ import maplibregl from 'maplibre-gl'
 
 const style = await fetchMapStyle(apiUrl, 'Standard', getToken, {
   colorScheme: 'Dark',
-  terrain: 'Terrain3D',
-  buildings: 'Buildings3D',
   language: 'fr',
 })
 
@@ -128,9 +126,18 @@ const map = new maplibregl.Map({
   style,
   center: [-123.12, 49.28],
   zoom: 10,
-  maxPitch: 85,
   transformRequest: createTransformRequest(apiUrl, getToken),
 })
+```
+
+3D terrain and buildings need the `terrain` and `buildings` plan features — see [Plan features](#plan-features):
+
+```typescript
+const style = await fetchMapStyle(apiUrl, 'Standard', getToken, {
+  terrain: 'Terrain3D',
+  buildings: 'Buildings3D',
+})
+// then `maxPitch: 85` on the map, so the camera can tilt to see them
 ```
 
 ### Switching Map Language
@@ -169,6 +176,74 @@ setAllPoiVisibility(map, false)
 ```
 
 Available categories: `food_drink`, `entertainment`, `sights`, `transit`, `accommodations`, `leisure`, `shopping`, `business`, `facilities`, `areas`, `parks`.
+
+### Plan features
+
+Some options are features of the application's plan. An application whose plan
+does not include one is refused **403 `FeatureNotEntitledException`** before
+anything is fetched upstream, so the refusal is not billed, and the message
+names each refused feature and the option that asked for it:
+
+> This application's plan does not include the map feature terrain (terrain=Terrain3D).
+
+| Feature           | What asks for it                                                                                                                      |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `satellite`       | the `Satellite` and `Hybrid` styles, and a static map with no `style` — Satellite is its default                                      |
+| `terrain`         | `terrain` (`Hillshade`, `Terrain3D`)                                                                                                  |
+| `buildings`       | `buildings`                                                                                                                           |
+| `contours`        | `contourDensity`                                                                                                                      |
+| `traffic`         | `traffic`                                                                                                                             |
+| `travel-modes`    | `travelModes`                                                                                                                         |
+| `political-view`  | `politicalView`, on a style or a static map                                                                                           |
+| `rich place data` | `AdditionalFeatures` `Access`, `Contact`, `Phonemes` or `TimeZone` on a Places command, and the `GeoPlaces` details that ask for them |
+
+Everything else is open to every plan: the Standard and Monochrome styles,
+`colorScheme`, `poiDensity`, `poiCategories`, a label language, and the other
+`AdditionalFeatures`. Which plan includes which feature is on the
+[pricing page](https://chaosity.cloud/pricing), and deliberately not here: it can
+change without a release of this package. In the source, every gated option and
+value carries a `@planFeature` tag naming its feature, so your editor shows it.
+
+The token carries no feature list, so there is nothing to check beforehand — the
+403 is how you find out, and it is typed:
+
+```typescript
+import {
+  LocationServiceException,
+  fetchMapStyle,
+} from '@chaosity/location-client'
+
+try {
+  map.setStyle(await fetchMapStyle(apiUrl, 'Standard', getToken, options))
+} catch (err) {
+  if (err instanceof LocationServiceException && err.isFeatureNotEntitled) {
+    showMessage(err.message) // names the refused feature
+  } else throw err
+}
+```
+
+`isAuth` is true for it too, as for every 401 and 403 — but so it is for bad
+credentials, an `Origin` the application does not allow, and a route outside the
+plan, which all need different fixes. Branch on `isFeatureNotEntitled`, or on
+`code` against the exported `FEATURE_NOT_ENTITLED`.
+
+**What MapLibre fetches for itself is refused outside this package.**
+`fetchMapStyle`, `fetchStaticMap` and the Places commands reject with the typed
+error above. A style URL from `buildMapStyleUrl` handed to `setStyle`, and every
+tile, is fetched by MapLibre, so a refusal there arrives as a map `error` event:
+`error.status` is 403 and `error.body` is a `Blob` holding the same
+`{ message, code }` JSON.
+
+```typescript
+import { FEATURE_NOT_ENTITLED } from '@chaosity/location-client'
+
+map.on('error', async ({ error }) => {
+  const { status, body } = error as { status?: number; body?: Blob }
+  if (status !== 403 || !body) return
+  const { code, message } = JSON.parse(await body.text())
+  if (code === FEATURE_NOT_ENTITLED) showMessage(message)
+})
+```
 
 ### MapLibre Geocoder Integration
 
@@ -281,7 +356,7 @@ const style = await fetchMapStyle(
 )
 const blob = await fetchStaticMap(
   apiUrl,
-  { width: 640, height: 400, center },
+  { width: 640, height: 400, center, zoom: 14, style: 'Standard' },
   getToken,
   { signal },
 )
@@ -328,11 +403,7 @@ import { fetchMapStyle } from '@chaosity/location-client'
 
 const style = await fetchMapStyle(apiUrl, 'Standard', getToken, {
   colorScheme: 'Dark',
-  terrain: 'Terrain3D',
-  buildings: 'Buildings3D',
-  contourDensity: 'Medium',
-  traffic: 'All',
-  travelModes: ['Truck', 'Transit'],
+  poiDensity: 'Sparse',
   language: 'fr',
 })
 
@@ -341,6 +412,22 @@ const map = new maplibregl.Map({
   transformRequest: createTransformRequest(apiUrl, getToken),
 })
 ```
+
+The overlays need the `terrain`, `buildings`, `contours`, `traffic` and `travel-modes` plan features — see [Plan features](#plan-features):
+
+```typescript
+const style = await fetchMapStyle(apiUrl, 'Standard', getToken, {
+  terrain: 'Terrain3D',
+  buildings: 'Buildings3D',
+  contourDensity: 'Medium',
+  traffic: 'All',
+  travelModes: ['Truck', 'Transit'],
+})
+```
+
+This is the call that surfaces a refusal as `LocationServiceException`; a URL
+MapLibre fetches for itself reports it as a map `error` event instead (see
+[Plan features](#plan-features)).
 
 #### buildMapStyleUrl
 
@@ -351,30 +438,24 @@ import { buildMapStyleUrl } from '@chaosity/location-client'
 
 const url = buildMapStyleUrl(apiUrl, 'Standard', {
   colorScheme: 'Dark',
-  terrain: 'Hillshade',
 })
 ```
 
 #### MapStyleOptions
 
-```typescript
-interface MapStyleOptions {
-  colorScheme?: 'Light' | 'Dark'
-  politicalView?: string // ISO 3166-1 alpha-3 (e.g. 'IND', 'TUR')
-  terrain?: 'Hillshade' | 'Terrain3D'
-  buildings?: 'Buildings3D'
-  contourDensity?: 'High' | 'Low' | 'Medium'
-  traffic?: 'All' | 'Congestion'
-  travelModes?: Array<'Truck' | 'Transit'>
-  poiDensity?: PoiDensity // 'Off' draws no points of interest
-  poiCategories?: StylePoiCategory[] // draw only these, e.g. ['FoodAndDrink']
-}
-```
+The options, the values each accepts, and which of them are plan features are
+documented on the type — `MapStyleOptions` in `src/maps/mapStyle.ts`, with the
+value lists in `src/maps/mapEnums.ts` — and your editor shows them as you type.
+They are not copied here, because the copy that used to be here drifted from the
+source.
 
 Every accepted value is exported as an array (`POI_DENSITIES`,
-`STYLE_POI_CATEGORIES`, `TRAFFIC_MODES`, …) so a picker can be built from it.
-Values are case sensitive, and some combinations are the API's to refuse — for
-example `traffic: 'All'` on Satellite. There is no `language` here:
+`STYLE_POI_CATEGORIES`, `TRAFFIC_MODES`, …) so a picker can be built from it. A
+list tagged `@planFeature` — `MAP_STYLES`, `TERRAINS`, `TRAFFIC_MODES` and the
+others in [Plan features](#plan-features) — holds values some plans are refused,
+so leave those out of a picker or mark them. Values are case sensitive, and some
+combinations are the API's to refuse — for example `traffic: 'All'` on
+Satellite. There is no `language` here:
 `fetchMapStyle` takes `language` separately and applies it to the descriptor
 itself, because the service's style descriptor has no language parameter.
 
@@ -427,6 +508,12 @@ error rather than a field that is sent and silently ignored. The exported
 `<Name>CommandInput` and `<Name>Request` types are narrowed the same way. At
 runtime nothing is removed: the request body is your input, unchanged, and a
 field cast past the type is stripped by the service all the same.
+
+**`AdditionalFeatures` `Access`, `Contact`, `Phonemes` and `TimeZone` are rich
+place data**, a plan feature. On a plan without it the request
+is refused 403 `FeatureNotEntitledException` — see
+[Plan features](#plan-features). `SecondaryAddresses`, `Intersections`,
+`CrossReferences` and `Core` are open to every plan.
 
 #### Data Type Utilities
 

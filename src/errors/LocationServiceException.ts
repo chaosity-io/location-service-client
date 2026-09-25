@@ -1,3 +1,18 @@
+/**
+ * The code of a 403 for an option the application's plan does not include
+ * (#55): a map feature such as `satellite` or `terrain`, or rich place data.
+ * The options that can earn it are tagged `@planFeature` in their
+ * documentation.
+ *
+ * The service refuses before calling upstream, so the refusal is not billed,
+ * and its message names each refused feature and the option that asked for
+ * it. It never names a plan: which plan includes which feature can change
+ * without a release of this package — see https://chaosity.cloud/pricing.
+ * Nothing in the token lists the features either, so this 403 is the first a
+ * caller hears of it; there is no check to make beforehand.
+ */
+export const FEATURE_NOT_ENTITLED = 'FeatureNotEntitledException'
+
 export interface LocationServiceExceptionOptions {
   message: string
   code: string
@@ -61,9 +76,25 @@ export class LocationServiceException extends Error {
     return this.code === 'ValidationException' || this.statusCode === 400
   }
 
-  /** Credentials or entitlements — the caller must act, retrying will not help. */
+  /**
+   * Any 401 or 403 — the caller must act, and retrying will not help.
+   *
+   * That is several failures with different remedies: bad or expired
+   * credentials, an `Origin` the application does not allow, a route its plan
+   * does not include, an option its plan does not include. Branch on `code`,
+   * or on `isFeatureNotEntitled` for the last, to tell them apart.
+   */
   get isAuth(): boolean {
     return this.statusCode === 401 || this.statusCode === 403
+  }
+
+  /**
+   * The application's plan does not include an option this request asked for
+   * (`FEATURE_NOT_ENTITLED`). The message names the feature; drop the option,
+   * or move the application to a plan that includes it.
+   */
+  get isFeatureNotEntitled(): boolean {
+    return this.code === FEATURE_NOT_ENTITLED
   }
 
   get isAborted(): boolean {

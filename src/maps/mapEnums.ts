@@ -40,9 +40,27 @@
  * client-side mirror and every value below was additionally confirmed against
  * the live geo-maps API on 2026-08-26. If the API starts rejecting something
  * listed here, its generated list is the authority.
+ *
+ * SOME VALUES ARE PLAN FEATURES
+ *
+ * A list tagged `@planFeature <feature>` holds values the application's plan
+ * must include — every value, or only the ones named after the dash (#55). A
+ * value the plan lacks is refused 403 `FeatureNotEntitledException`, naming
+ * the feature, so a picker built from `MAP_STYLES` offers Satellite to an
+ * application that will be refused it. Leave those out of a picker, or mark
+ * them. Which plan includes which feature is not this file's to say — it can
+ * change without a release: see https://chaosity.cloud/pricing. A list with no
+ * tag is open to every plan.
  */
 
-/** Map styles for the style descriptor. */
+/**
+ * Map styles for the style descriptor.
+ *
+ * Refused on a plan without it: 403 `FeatureNotEntitledException`, see
+ * `FEATURE_NOT_ENTITLED` and the note at the top of this file.
+ *
+ * @planFeature satellite — Hybrid, Satellite
+ */
 export const MAP_STYLES = [
   'Hybrid',
   'Monochrome',
@@ -56,6 +74,14 @@ export type MapStyle = (typeof MAP_STYLES)[number]
  *
  * `/maps/static/*` takes only Satellite and Standard. Passing Hybrid or
  * Monochrome there is a 400, so the two lists are not interchangeable.
+ *
+ * A static map with no `style` is a Satellite render, so it needs the
+ * `satellite` feature as well.
+ *
+ * Refused on a plan without it: 403 `FeatureNotEntitledException`, see
+ * `FEATURE_NOT_ENTITLED` and the note at the top of this file.
+ *
+ * @planFeature satellite — Satellite
  */
 export const STATIC_MAP_STYLES = ['Satellite', 'Standard'] as const
 export type StaticMapStyle = (typeof STATIC_MAP_STYLES)[number]
@@ -64,11 +90,25 @@ export type StaticMapStyle = (typeof STATIC_MAP_STYLES)[number]
 export const COLOR_SCHEMES = ['Dark', 'Light'] as const
 export type ColorScheme = (typeof COLOR_SCHEMES)[number]
 
-/** Terrain overlay. `Hillshade` is shaded relief; `Terrain3D` is elevation. */
+/**
+ * Terrain overlay. `Hillshade` is shaded relief; `Terrain3D` is elevation.
+ *
+ * Refused on a plan without it: 403 `FeatureNotEntitledException`, see
+ * `FEATURE_NOT_ENTITLED` and the note at the top of this file.
+ *
+ * @planFeature terrain
+ */
 export const TERRAINS = ['Hillshade', 'Terrain3D'] as const
 export type Terrain = (typeof TERRAINS)[number]
 
-/** 3D building extrusions. One value today, kept a list for when that changes. */
+/**
+ * 3D building extrusions. A list, like the others, for when Amazon adds a value.
+ *
+ * Refused on a plan without it: 403 `FeatureNotEntitledException`, see
+ * `FEATURE_NOT_ENTITLED` and the note at the top of this file.
+ *
+ * @planFeature buildings
+ */
 export const BUILDINGS = ['Buildings3D'] as const
 export type Buildings = (typeof BUILDINGS)[number]
 
@@ -78,6 +118,11 @@ export type Buildings = (typeof BUILDINGS)[number]
  * All three work. An earlier version of this library documented `Medium` as
  * "the only value currently supported by the AWS SDK", which was wrong — `High`
  * and `Low` were both confirmed against the live API on 2026-08-26.
+ *
+ * Refused on a plan without it: 403 `FeatureNotEntitledException`, see
+ * `FEATURE_NOT_ENTITLED` and the note at the top of this file.
+ *
+ * @planFeature contours
  */
 export const CONTOUR_DENSITIES = ['High', 'Low', 'Medium'] as const
 export type ContourDensity = (typeof CONTOUR_DENSITIES)[number]
@@ -87,11 +132,23 @@ export type ContourDensity = (typeof CONTOUR_DENSITIES)[number]
  *
  * `Congestion` was previously missing from this library's types, so it could
  * not be requested from TypeScript even though the API accepts it.
+ *
+ * Refused on a plan without it: 403 `FeatureNotEntitledException`, see
+ * `FEATURE_NOT_ENTITLED` and the note at the top of this file.
+ *
+ * @planFeature traffic
  */
 export const TRAFFIC_MODES = ['All', 'Congestion'] as const
 export type TrafficMode = (typeof TRAFFIC_MODES)[number]
 
-/** Routing overlays. Sent as a comma-separated list; each entry is checked. */
+/**
+ * Routing overlays. Sent as a comma-separated list; each entry is checked.
+ *
+ * Refused on a plan without it: 403 `FeatureNotEntitledException`, see
+ * `FEATURE_NOT_ENTITLED` and the note at the top of this file.
+ *
+ * @planFeature travel-modes
+ */
 export const TRAVEL_MODES = ['Transit', 'Truck'] as const
 export type TravelMode = (typeof TRAVEL_MODES)[number]
 

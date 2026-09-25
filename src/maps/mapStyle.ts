@@ -23,15 +23,46 @@ import { labelsByName, languageExpression } from './mapLanguage.js'
  * Values are CASE SENSITIVE — the API rejects a wrong-cased one with a 400 that
  * names the right spelling. Import the arrays from `mapEnums` to build pickers
  * rather than typing the values, and the case is right by construction.
+ *
+ * The options tagged `@planFeature` are PLAN FEATURES, each tag naming its
+ * feature (#55). An application whose plan does not include one is
+ * refused 403 `FeatureNotEntitledException` — `isFeatureNotEntitled` on the
+ * error — before anything is drawn, and the message names the feature and the
+ * option that asked for it. `colorScheme`, `poiDensity` and `poiCategories`
+ * are open to every plan, as are the Standard and Monochrome styles. Which plan
+ * includes which feature is not this package's to say, since it can change
+ * without a release: see https://chaosity.cloud/pricing.
  */
 export interface MapStyleOptions {
   /** Color scheme for the map (default: Light). Not applicable to Satellite/Hybrid styles. */
   colorScheme?: ColorScheme
-  /** ISO 3166-1 alpha-3 country code for political boundary perspective (e.g. 'IND', 'TUR'). */
+  /**
+   * ISO 3166-1 alpha-3 country code for political boundary perspective
+   * (e.g. 'IND', 'TUR').
+   *
+   * Refused on a plan without it: 403 `FeatureNotEntitledException` (see
+   * `FEATURE_NOT_ENTITLED`).
+   *
+   * @planFeature political-view
+   */
   politicalView?: string
-  /** Terrain overlay type. */
+  /**
+   * Terrain overlay type.
+   *
+   * Refused on a plan without it: 403 `FeatureNotEntitledException` (see
+   * `FEATURE_NOT_ENTITLED`).
+   *
+   * @planFeature terrain
+   */
   terrain?: Terrain
-  /** Enable 3D building extrusions. */
+  /**
+   * Enable 3D building extrusions.
+   *
+   * Refused on a plan without it: 403 `FeatureNotEntitledException` (see
+   * `FEATURE_NOT_ENTITLED`).
+   *
+   * @planFeature buildings
+   */
   buildings?: Buildings
   /**
    * Elevation contour line density.
@@ -39,6 +70,11 @@ export interface MapStyleOptions {
    * All of High, Low and Medium work. This was previously typed as `'Medium'`
    * alone, documented as "the only value currently supported by the AWS SDK",
    * which was wrong — the other two were confirmed against the live API.
+   *
+   * Refused on a plan without it: 403 `FeatureNotEntitledException` (see
+   * `FEATURE_NOT_ENTITLED`).
+   *
+   * @planFeature contours
    */
   contourDensity?: ContourDensity
   /**
@@ -49,9 +85,21 @@ export interface MapStyleOptions {
    *
    * Valid on its own, but NOT with every style: `Satellite` + `All` answers
    * 400 "Traffic is not supported for style." Amazon owns that rule.
+   *
+   * Refused on a plan without it: 403 `FeatureNotEntitledException` (see
+   * `FEATURE_NOT_ENTITLED`).
+   *
+   * @planFeature traffic
    */
   traffic?: TrafficMode
-  /** Travel mode overlays for routing-specific features. */
+  /**
+   * Travel mode overlays for routing-specific features.
+   *
+   * Refused on a plan without it: 403 `FeatureNotEntitledException` (see
+   * `FEATURE_NOT_ENTITLED`).
+   *
+   * @planFeature travel-modes
+   */
   travelModes?: TravelMode[]
   /**
    * How many points of interest to draw; `Off` draws none. Standard and
@@ -68,13 +116,18 @@ export interface MapStyleOptions {
 /**
  * Build a map style descriptor URL for the Location Service API.
  *
+ * MapLibre fetches this URL itself, so a refusal of it never reaches this
+ * package's error type — see `fetchMapStyle` for what it looks like instead.
+ *
  * @param apiUrl - Base URL of the Location Service API
- * @param mapStyle - Map style name (e.g. 'Standard', 'Monochrome', 'Satellite', 'Hybrid')
- * @param options - Optional style parameters
+ * @param mapStyle - Map style name: 'Standard' or 'Monochrome', or 'Satellite'
+ *   or 'Hybrid', which need the `satellite` plan feature (see `MAP_STYLES`)
+ * @param options - Optional style parameters; those tagged `@planFeature` need
+ *   that feature of the application's plan
  * @returns Full style descriptor URL
  *
  * @example
- * const url = buildMapStyleUrl(API_URL, 'Standard', { colorScheme: 'Dark', terrain: 'Hillshade' })
+ * const url = buildMapStyleUrl(API_URL, 'Standard', { colorScheme: 'Dark' })
  * map.setStyle(url)
  */
 export function buildMapStyleUrl(
@@ -112,10 +165,24 @@ export function buildMapStyleUrl(
  * `map.setStyle()`. Tile, glyph, and sprite requests still go through `transformRequest`
  * for authentication — this only pre-processes the descriptor itself.
  *
+ * A REFUSED OPTION. This is the path that surfaces a plan refusal as this
+ * package's error: an option tagged `@planFeature` that the application's plan
+ * does not include rejects with a `LocationServiceException` whose
+ * `isFeatureNotEntitled` is true (code `FeatureNotEntitledException`, status
+ * 403), and whose message names the feature and the option. What MapLibre
+ * fetches for itself — a URL from `buildMapStyleUrl` handed to `setStyle`, and
+ * the tiles — is refused the same way when it asks for a feature the plan
+ * lacks, but the refusal arrives as a MapLibre `error` event instead:
+ * `event.error.status` is 403, and `event.error.body` is a `Blob` holding the
+ * same `{ message, code }` JSON.
+ *
  * @param apiUrl - Base URL of the Location Service API
- * @param mapStyle - Map style name (e.g. 'Standard', 'Monochrome', 'Satellite', 'Hybrid')
+ * @param mapStyle - Map style name: 'Standard' or 'Monochrome', or 'Satellite'
+ *   or 'Hybrid', which need the `satellite` plan feature (see `MAP_STYLES`)
  * @param getToken - Callback returning the current auth token
- * @param options - Style options; `language` is applied to the descriptor, all others become URL params
+ * @param options - Style options; `language` is applied to the descriptor, all
+ *   others become URL params. Those tagged `@planFeature` need that feature of
+ *   the application's plan
  * @param request - Transport options: `signal` to cancel, `timeoutMs`, `overallTimeoutMs`, `retry`
  * @returns Modified MapLibre StyleSpecification object
  *
