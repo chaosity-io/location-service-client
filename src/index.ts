@@ -17,7 +17,10 @@ export {
 } from './auth/tokenRefresh.js'
 
 // Errors
-export { LocationServiceException } from './errors/LocationServiceException.js'
+export {
+  FEATURE_NOT_ENTITLED,
+  LocationServiceException,
+} from './errors/LocationServiceException.js'
 export type { LocationServiceExceptionOptions } from './errors/LocationServiceException.js'
 
 // Re-export AWS SDK commands and types

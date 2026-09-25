@@ -51,8 +51,11 @@ export interface AppConfigClaims {
    * route template, such as `POST /address/autocomplete` or
    * `GET /maps/static/{fileName}` (#40).
    *
-   * So an application can ask "may I show a static map?" before it offers
-   * one, rather than only learning from the 403. The same rule as `countries`
+   * So an application can ask "may I call the static-map route?" before it
+   * offers one, rather than only learning from the 403. It answers for the
+   * route, not for the options sent on it: a plan feature (`@planFeature`) is
+   * answered only by its own 403, and a static map's default Satellite render
+   * is one (#55). The same rule as `countries`
    * applies, for the same reason: show it, never refuse with it. A route
    * granted since the token was minted is answered by the API, which reads the
    * entitlement fresh on every request.

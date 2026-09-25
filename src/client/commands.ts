@@ -47,6 +47,14 @@ import {
  */
 export type NeverForwarded = 'IntendedUse' | 'Key'
 
+// RICH PLACE DATA (#55). The `AdditionalFeatures` values Access, Contact,
+// Phonemes and TimeZone are a feature of the application's plan. On a plan
+// without it the request is refused 403 `FeatureNotEntitledException`
+// (`isFeatureNotEntitled` on the error), and nothing is returned or billed.
+// Each command below that accepts one says which, in a `@planFeature` tag;
+// the others — SecondaryAddresses, Intersections, CrossReferences, Core — are
+// open to every plan. Which plans include it: https://chaosity.cloud/pricing.
+
 export type AutocompleteRequest = Omit<SdkAutocompleteRequest, NeverForwarded>
 export type AutocompleteCommandInput = Omit<
   SdkAutocompleteCommandInput,
@@ -60,6 +68,13 @@ export class AutocompleteCommand extends SdkAutocompleteCommand {
 
 export type GeocodeRequest = Omit<SdkGeocodeRequest, NeverForwarded>
 export type GeocodeCommandInput = Omit<SdkGeocodeCommandInput, NeverForwarded>
+/**
+ * Accepts rich place data, a plan feature: on a plan without it these
+ * `AdditionalFeatures` are refused 403 `FeatureNotEntitledException`
+ * (`isFeatureNotEntitled` on the error; see `FEATURE_NOT_ENTITLED`).
+ *
+ * @planFeature rich place data — Access, TimeZone
+ */
 export class GeocodeCommand extends SdkGeocodeCommand {
   constructor(input: GeocodeCommandInput) {
     super(input)
@@ -68,6 +83,13 @@ export class GeocodeCommand extends SdkGeocodeCommand {
 
 export type GetPlaceRequest = Omit<SdkGetPlaceRequest, NeverForwarded>
 export type GetPlaceCommandInput = Omit<SdkGetPlaceCommandInput, NeverForwarded>
+/**
+ * Accepts rich place data, a plan feature: on a plan without it these
+ * `AdditionalFeatures` are refused 403 `FeatureNotEntitledException`
+ * (`isFeatureNotEntitled` on the error; see `FEATURE_NOT_ENTITLED`).
+ *
+ * @planFeature rich place data — Access, Contact, Phonemes, TimeZone
+ */
 export class GetPlaceCommand extends SdkGetPlaceCommand {
   constructor(input: GetPlaceCommandInput) {
     super(input)
@@ -82,6 +104,13 @@ export type ReverseGeocodeCommandInput = Omit<
   SdkReverseGeocodeCommandInput,
   NeverForwarded
 >
+/**
+ * Accepts rich place data, a plan feature: on a plan without it these
+ * `AdditionalFeatures` are refused 403 `FeatureNotEntitledException`
+ * (`isFeatureNotEntitled` on the error; see `FEATURE_NOT_ENTITLED`).
+ *
+ * @planFeature rich place data — Access, TimeZone
+ */
 export class ReverseGeocodeCommand extends SdkReverseGeocodeCommand {
   constructor(input: ReverseGeocodeCommandInput) {
     super(input)
@@ -93,6 +122,13 @@ export type SearchNearbyCommandInput = Omit<
   SdkSearchNearbyCommandInput,
   NeverForwarded
 >
+/**
+ * Accepts rich place data, a plan feature: on a plan without it these
+ * `AdditionalFeatures` are refused 403 `FeatureNotEntitledException`
+ * (`isFeatureNotEntitled` on the error; see `FEATURE_NOT_ENTITLED`).
+ *
+ * @planFeature rich place data — Access, Contact, Phonemes, TimeZone
+ */
 export class SearchNearbyCommand extends SdkSearchNearbyCommand {
   constructor(input: SearchNearbyCommandInput) {
     super(input)
@@ -104,6 +140,13 @@ export type SearchTextCommandInput = Omit<
   SdkSearchTextCommandInput,
   NeverForwarded
 >
+/**
+ * Accepts rich place data, a plan feature: on a plan without it these
+ * `AdditionalFeatures` are refused 403 `FeatureNotEntitledException`
+ * (`isFeatureNotEntitled` on the error; see `FEATURE_NOT_ENTITLED`).
+ *
+ * @planFeature rich place data — Access, Contact, Phonemes, TimeZone
+ */
 export class SearchTextCommand extends SdkSearchTextCommand {
   constructor(input: SearchTextCommandInput) {
     super(input)
@@ -112,6 +155,13 @@ export class SearchTextCommand extends SdkSearchTextCommand {
 
 export type SuggestRequest = Omit<SdkSuggestRequest, NeverForwarded>
 export type SuggestCommandInput = Omit<SdkSuggestCommandInput, NeverForwarded>
+/**
+ * Accepts rich place data, a plan feature: on a plan without it these
+ * `AdditionalFeatures` are refused 403 `FeatureNotEntitledException`
+ * (`isFeatureNotEntitled` on the error; see `FEATURE_NOT_ENTITLED`).
+ *
+ * @planFeature rich place data — Access, Phonemes, TimeZone
+ */
 export class SuggestCommand extends SdkSuggestCommand {
   constructor(input: SuggestCommandInput) {
     super(input)
