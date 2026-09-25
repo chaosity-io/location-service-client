@@ -38,6 +38,7 @@ npm install maplibre-gl @maplibre/maplibre-gl-geocoder
 
 - **Custom Authentication**: Uses Bearer tokens instead of AWS SigV4
 - **AWS SDK Commands**: Full access to all AWS Location Service commands
+- **Address Verification**: `verifyAddress(placeId)` returns the one Places result you may store — see [Verifying an address](#verifying-an-address)
 - **Data Type Utilities**: Built-in GeoJSON conversion utilities
 - **MapLibre Integration**: Adapter for MapLibre GL Geocoder and `createTransformRequest` helper
 - **Map Style Control**: Fetch and customize map style descriptors — color scheme, points of interest, label language, and terrain, 3D buildings, traffic and more as [plan features](#plan-features)
@@ -101,9 +102,77 @@ const client = new GeoPlacesClient({
 })
 
 const response: SuggestCommandOutput = await client.send(
-  new SuggestCommand({ QueryText: 'Vancouver', MaxResults: 5 }),
+  new SuggestCommand({
+    QueryText: 'Vancouver',
+    MaxResults: 5,
+    // Suggest takes exactly one of BiasPosition, Filter.BoundingBox or Filter.Circle.
+    BiasPosition: [-123.1207, 49.2827],
+  }),
 )
 ```
+
+### Verifying an address
+
+`POST /address/verify` resolves one PlaceId to the full place record plus
+`verified`. The PlaceId can come from any suggestion, autocomplete, geocode or
+place result, a unit's included. The answer is **the one Places result you may
+store**; every other result is for display only. The exception is a place in
+Japan, which may not be stored at all.
+
+The flow is suggest, then an optional unit pick, then verify at submit:
+
+```typescript
+import {
+  GetPlaceCommand,
+  SuggestCommand,
+  type GetPlaceCommandOutput,
+  type SuggestCommandOutput,
+} from '@chaosity/location-client'
+
+// 1. While the person types: suggestions, for display.
+const suggestions: SuggestCommandOutput = await client.send(
+  // Suggest takes exactly one of BiasPosition, Filter.BoundingBox or Filter.Circle.
+  new SuggestCommand({
+    QueryText: '100 George St, Sydney',
+    BiasPosition: [151.2093, -33.8688],
+  }),
+)
+const picked = suggestions.ResultItems?.[0]?.Place?.PlaceId
+
+// 2. Optionally, offer the building's units. Each has its own PlaceId.
+const building: GetPlaceCommandOutput = await client.send(
+  new GetPlaceCommand({
+    PlaceId: picked!,
+    AdditionalFeatures: ['SecondaryAddresses'],
+  }),
+)
+const unit = building.SecondaryAddresses?.[0]?.PlaceId
+
+// 3. At submit, once: verify the PlaceId that was chosen.
+const answer = await client.verifyAddress(unit ?? picked!)
+if (answer.verified) {
+  // `answer` is the record you may keep.
+}
+```
+
+- `verified` is `true` for a `PointAddress`, or a `SecondaryAddress` (a unit).
+  It is `false` for anything else: an interpolated address, a street, a
+  locality, a point of interest. A `false` is still a 200, so the call
+  resolves; it does not throw.
+- **Every verify is billed, whether or not the address verifies.** Call it
+  once per chosen PlaceId, at submit. Never call it per keystroke, or on every
+  pick.
+- Only the `PlaceId` is sent. `VerifyAddressCommandInput` has no other field,
+  because the service would drop `Language`, `PoliticalView` and
+  `AdditionalFeatures`. A repeat verify of the same PlaceId may be answered
+  from the service's own store, and is billed all the same.
+- Keep the PlaceId you sent beside the answer. The answer's own `PlaceId` can
+  differ, and for a unit it does. The service does not accept that one back,
+  while the one you sent verifies again.
+- `client.verifyAddress(placeId)` is
+  `client.send(new VerifyAddressCommand({ PlaceId: placeId }))`, typed as
+  `VerifyAddressResponse`. `connector.verifyAddress` does the same on the
+  server.
 
 ### MapLibre Map Integration
 
@@ -323,8 +392,8 @@ worth a second round trip. A 403 is never retried: a new token cannot fix an
 #### Request options
 
 Every call in this package takes the same options object — `client.send`,
-`connector.send`, `fetchMapStyle` and `fetchStaticMap` — and every failure
-arrives as a `LocationServiceException`.
+`connector.send`, `verifyAddress` on either, `fetchMapStyle` and
+`fetchStaticMap` — and every failure arrives as a `LocationServiceException`.
 
 ```typescript
 await client.send(command, {
@@ -515,6 +584,14 @@ is refused 403 `FeatureNotEntitledException` — see
 [Plan features](#plan-features). `SecondaryAddresses`, `Intersections`,
 `CrossReferences` and `Core` are open to every plan.
 
+`VerifyAddressCommand` is this package's own: `POST /address/verify` has no
+SDK command. Its input is `{ PlaceId }` and nothing else, and it answers a
+`VerifyAddressResponse` — see [Verifying an address](#verifying-an-address).
+
+```typescript
+import { VerifyAddressCommand } from '@chaosity/location-client'
+```
+
 #### Data Type Utilities
 
 GeoJSON conversion utilities from `@aws/amazon-location-utilities-datatypes`:
@@ -584,7 +661,11 @@ const connector = new LocationServiceConnector({
 })
 
 const result = await connector.send(
-  new SuggestCommand({ QueryText: 'Vancouver' }),
+  new SuggestCommand({
+    QueryText: 'Vancouver',
+    // Suggest takes exactly one of BiasPosition, Filter.BoundingBox or Filter.Circle.
+    BiasPosition: [-123.1207, 49.2827],
+  }),
 )
 ```
 
@@ -657,7 +738,11 @@ Full TypeScript support with types from AWS SDK:
 import type { SuggestCommandOutput } from '@chaosity/location-client'
 
 const response: SuggestCommandOutput = await client.send(
-  new SuggestCommand({ QueryText: 'Vancouver' }),
+  new SuggestCommand({
+    QueryText: 'Vancouver',
+    // Suggest takes exactly one of BiasPosition, Filter.BoundingBox or Filter.Circle.
+    BiasPosition: [-123.1207, 49.2827],
+  }),
 )
 ```
 

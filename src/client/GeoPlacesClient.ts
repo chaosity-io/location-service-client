@@ -6,6 +6,8 @@ import { requestJson } from '../transport/http.js'
 import type { ClientConfig, GeoPlacesCommand } from '../types/index.js'
 import type { AppConfigClaims } from '../utils/tokenClaims.js'
 import { readAppConfigClaims } from '../utils/tokenClaims.js'
+import type { VerifyAddressResponse } from './commands.js'
+import { VerifyAddressCommand } from './commands.js'
 
 const log = debug('location-client:api')
 
@@ -119,6 +121,21 @@ export class GeoPlacesClient {
       )
       return await this.dispatch<TOutput>(url, fresh, cmd, options)
     }
+  }
+
+  /**
+   * Verify a PlaceId: `send(new VerifyAddressCommand({ PlaceId }))`, typed
+   * (#54). Resolves the full place record plus `verified`, and resolves a
+   * `verified: false` too — see VerifyAddressResponse for what may be stored.
+   *
+   * Billed per call, whether or not the address verifies: call it once per
+   * chosen PlaceId, at submit, never per keystroke.
+   */
+  verifyAddress(
+    placeId: string,
+    options?: SendOptions,
+  ): Promise<VerifyAddressResponse> {
+    return this.send(new VerifyAddressCommand({ PlaceId: placeId }), options)
   }
 
   private dispatch<TOutput>(

@@ -21,7 +21,9 @@ Everything else is identical to AWS SDK.
 ### 2. Client Layer (Custom wrapper, AWS SDK commands)
 
 - `GeoPlacesClient` - Wraps AWS SDK commands with Bearer auth
-- Uses AWS SDK command classes directly (no custom commands)
+- Uses the AWS SDK's command classes, narrowed (#40), plus one of the
+  package's own for a route the SDK has no command for (`VerifyAddressCommand`,
+  #54)
 
 ### 3. Adapter Layer (Custom)
 
@@ -68,7 +70,8 @@ import {
 ## Benefits
 
 1. **Zero Type Maintenance** - Types always in sync with AWS SDK
-2. **Zero Command Maintenance** - Commands always in sync with AWS SDK
+2. **Little Command Maintenance** - The SDK's commands track the AWS SDK; the
+   one command the SDK lacks (`VerifyAddressCommand`) is this package's own
 3. **AWS SDK Updates** - New parameters automatically available
 4. **Type Safety** - Full TypeScript support from AWS SDK
 5. **Documentation** - Refer to AWS SDK docs directly
@@ -77,21 +80,17 @@ import {
 
 ```typescript
 // 1. Import AWS Location Client commands
-import {
-  GeoPlacesClient,
-  places,
-  placeToFeatureCollection,
-} from '@chaosity/location-client'
+import { GeoPlacesClient, SuggestCommand } from '@chaosity/location-client'
 
 // 2. Create client with Bearer token auth
 const client = new GeoPlacesClient({ apiUrl, token })
 
-// 3. Use AWS Location Client commands
-const command = new places.SuggestCommand({ QueryText: 'Vancouver' })
+// 3. Use AWS Location Client commands. Suggest takes exactly one of BiasPosition, Filter.BoundingBox or Filter.Circle.
+const command = new SuggestCommand({
+  QueryText: 'Vancouver',
+  BiasPosition: [-123.1207, 49.2827],
+})
 const response = await client.send(command)
-
-// 4. Convert to GeoJSON using AWS utilities
-const featureCollection = placeToFeatureCollection(response)
 ```
 
 ## Comparison with AWS SDK
@@ -105,22 +104,29 @@ import { withAPIKey } from '@aws/amazon-location-client'
 const authHelper = withAPIKey('api-key', 'us-east-1')
 const client = new GeoPlacesClient(authHelper.getClientConfig())
 
-const command = new places.SuggestCommand({ QueryText: 'Vancouver' })
+const command = new places.SuggestCommand({
+  QueryText: 'Vancouver',
+  BiasPosition: [-123.1207, 49.2827],
+})
 const response = await client.send(command)
 ```
 
 ### Our Client
 
 ```typescript
-import { GeoPlacesClient, places } from '@chaosity/location-client'
+import { GeoPlacesClient, SuggestCommand } from '@chaosity/location-client'
 
 const client = new GeoPlacesClient({
   apiUrl: 'https://api.example.com',
   token: 'bearer-token',
 })
 
-const command = new places.SuggestCommand({ QueryText: 'Vancouver' })
+const command = new SuggestCommand({
+  QueryText: 'Vancouver',
+  BiasPosition: [-123.1207, 49.2827],
+})
 const response = await client.send(command)
 ```
 
-**Only difference**: Auth config (Bearer token vs API key/SigV4)
+**Differences**: auth config (Bearer token vs API key/SigV4), and the commands
+are named exports rather than a `places` namespace
