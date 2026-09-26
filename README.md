@@ -34,6 +34,12 @@ npm install maplibre-gl
 npm install maplibre-gl @maplibre/maplibre-gl-geocoder
 ```
 
+The map helpers need `maplibre-gl` 6.4.1 or a later 6.x release. Earlier
+releases carry
+[GHSA-jrc7-96c5-q579](https://github.com/advisories/GHSA-jrc7-96c5-q579), an
+XSS in the attribution control, and none of them has a fix. MapLibre 6 needs
+its worker set up once under a bundler: see [The MapLibre worker](#the-maplibre-worker).
+
 ## Key Features
 
 - **Custom Authentication**: Uses Bearer tokens instead of AWS SigV4
@@ -183,7 +189,12 @@ import {
   fetchMapStyle,
   createTransformRequest,
 } from '@chaosity/location-client'
-import maplibregl from 'maplibre-gl'
+import * as maplibregl from 'maplibre-gl'
+import 'maplibre-gl/dist/maplibre-gl.css'
+// Vite. For other bundlers, see "The MapLibre worker" below.
+import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
+
+maplibregl.setWorkerUrl(workerUrl)
 
 const style = await fetchMapStyle(apiUrl, 'Standard', getToken, {
   colorScheme: 'Dark',
@@ -208,6 +219,58 @@ const style = await fetchMapStyle(apiUrl, 'Standard', getToken, {
 })
 // then `maxPitch: 85` on the map, so the camera can tilt to see them
 ```
+
+### The MapLibre worker
+
+MapLibre 6 loads and parses its tiles in a Web Worker, and it finds the
+worker's file from its own module URL. A bundler rewrites that URL, so an
+application built with one sets the worker's URL once, before the first map.
+Without it the map mounts, draws no tile, and logs "Worker failed to load".
+
+With Vite, import the worker's URL, as in the example above:
+
+```typescript
+import * as maplibregl from 'maplibre-gl'
+import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
+
+maplibregl.setWorkerUrl(workerUrl)
+```
+
+With Next.js, serve the worker and the chunk it imports from `public/`. Copy
+them before every build and dev run:
+
+```js
+// scripts/copy-maplibre-worker.mjs
+import { copyFileSync, mkdirSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import path from 'node:path'
+
+const pkg = createRequire(import.meta.url).resolve('maplibre-gl/package.json')
+const dist = path.join(path.dirname(pkg), 'dist')
+const dest = path.join(process.cwd(), 'public', 'maplibre')
+mkdirSync(dest, { recursive: true })
+for (const file of ['maplibre-gl-worker.mjs', 'maplibre-gl-shared.mjs']) {
+  copyFileSync(path.join(dist, file), path.join(dest, file))
+}
+```
+
+```json
+"scripts": {
+  "predev": "node scripts/copy-maplibre-worker.mjs",
+  "prebuild": "node scripts/copy-maplibre-worker.mjs"
+}
+```
+
+Then, in the client component that builds the map:
+
+```typescript
+import * as maplibregl from 'maplibre-gl'
+
+maplibregl.setWorkerUrl('/maplibre/maplibre-gl-worker.mjs')
+```
+
+Other bundlers, and loading MapLibre from a CDN, are covered in MapLibre's own
+[installation guide](https://maplibre.org/maplibre-gl-js/docs/#installation).
 
 ### Switching Map Language
 
@@ -321,7 +384,8 @@ Requires the optional peers: `npm install maplibre-gl @maplibre/maplibre-gl-geoc
 ```typescript
 import { GeoPlacesClient, GeoPlaces } from '@chaosity/location-client'
 import MaplibreGeocoder from '@maplibre/maplibre-gl-geocoder'
-import maplibregl from 'maplibre-gl'
+import '@maplibre/maplibre-gl-geocoder/dist/maplibre-gl-geocoder.css'
+import * as maplibregl from 'maplibre-gl'
 
 // GeoPlaces adapter takes a GeoPlacesClient instance and the map
 const client = new GeoPlacesClient({ apiUrl, token })
@@ -475,12 +539,9 @@ const style = await fetchMapStyle(apiUrl, 'Standard', getToken, {
   poiDensity: 'Sparse',
   language: 'fr',
 })
-
-const map = new maplibregl.Map({
-  style,
-  transformRequest: createTransformRequest(apiUrl, getToken),
-})
 ```
+
+Hand `style` to `new maplibregl.Map`, with the worker set, as in [MapLibre Map Integration](#maplibre-map-integration).
 
 The overlays need the `terrain`, `buildings`, `contours`, `traffic` and `travel-modes` plan features — see [Plan features](#plan-features):
 

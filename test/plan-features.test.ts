@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as Root from '../src/index'
 import { LocationServiceException, fetchMapStyle } from '../src/index'
 import { parseErrorResponse } from '../src/transport/errors'
+import { codeBlocks } from './readme-blocks'
 
 /**
  * Plan features (#55).
@@ -485,35 +486,16 @@ describe('FeatureNotEntitledException is typed', () => {
 
 const README = readFileSync(join(here, '../README.md'), 'utf8')
 
-interface Block {
-  line: number
-  code: string
-  marked: boolean
-}
-
 /**
  * Every fenced code block, and whether the prose right before it marks it as
  * needing a plan feature. The marker is the last non-empty line above the
  * fence naming "plan feature".
  */
-const codeBlocks = (markdown: string): Block[] => {
-  const lines = markdown.split('\n')
-  const blocks: Block[] = []
-  for (let i = 0; i < lines.length; i++) {
-    if (!/^```\w*/.test(lines[i])) continue
-    const start = i
-    let before = start - 1
-    while (before >= 0 && !lines[before].trim()) before--
-    const end = lines.findIndex((l, j) => j > start && /^```\s*$/.test(l))
-    blocks.push({
-      line: start + 1,
-      code: lines.slice(start + 1, end).join('\n'),
-      marked: before >= 0 && /plan feature/i.test(lines[before]),
-    })
-    i = end
-  }
-  return blocks
-}
+const markedBlocks = (markdown: string) =>
+  codeBlocks(markdown).map((b) => ({
+    ...b,
+    marked: /plan feature/i.test(b.preceding),
+  }))
 
 const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
@@ -547,7 +529,7 @@ const GATED_TOKENS: RegExp[] = [
 ]
 
 describe('the README', () => {
-  const blocks = codeBlocks(README)
+  const blocks = markedBlocks(README)
 
   it('has code blocks to check', () => {
     expect(blocks.length).toBeGreaterThan(10)

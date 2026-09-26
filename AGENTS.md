@@ -220,6 +220,18 @@ working around them.
   not make them a hard requirement for consumers who only use the Places
   commands — a consumer who never touches the map surface should not download
   them at all.
+- **The `maplibre-gl` peer starts at 6.4.1**, the first release that fixes
+  GHSA-jrc7-96c5-q579, a critical XSS in the attribution control. There is no
+  5.x fix. MapLibre 6 is ESM only and has no default export, and under a
+  bundler it cannot find its worker until the application calls
+  `setWorkerUrl` (the README's "The MapLibre worker"). `test/maplibre-6.test.ts`
+  holds the peer, the devDependency and every lockfile copy at 6.4.1 or later.
+  It also parses every README code block: none may default-import or
+  `require` `maplibre-gl`, and each one that builds a map sets the worker. A
+  block that imports nothing from it is read as naming it `maplibregl`, so a
+  fragment is held to the rule too.
+  Raising the peer to a new major is a MINOR here, like any range this package
+  asks consumers to meet.
 - **Whether a URL gets the bearer token is a URL comparison, never a string
   prefix.** `url.startsWith(apiUrl)` matched `https://api.example.com.evil.test`
   against `https://api.example.com` and handed the customer's token to it (#34);
