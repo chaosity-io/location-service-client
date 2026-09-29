@@ -193,18 +193,80 @@ describe('what it says when authentication fails', () => {
     clientSecret: 'nope',
   }
 
-  it('turns a 401 into advice that names the client id and the variables', async () => {
+  /** The bodies /auth/token answers with, as the API sends them. */
+  const invalidCredentials = () =>
+    tokenErr(401, {
+      error: 'invalid_client',
+      code: 'InvalidCredentialsException',
+      error_description: 'Invalid credentials',
+    })
+  const notActive = () =>
+    tokenErr(401, {
+      error: 'invalid_client',
+      code: 'InvalidCredentialsException',
+      error_description: 'Application is not active',
+    })
+  /** The gateway's own 401: the authorizer refused the Basic pair. */
+  const gatewayUnauthorized = () =>
+    tokenErr(401, {
+      code: 'UnauthorizedException',
+      error: 'invalid_client',
+      message:
+        'Missing, malformed, expired or revoked credentials. Send HTTP Basic client credentials to /auth/token, or a Bearer token to other routes.',
+    })
+
+  it('adds the credentials advice, naming the client id, to a credentials refusal', async () => {
+    fetchMock.mockImplementation(async () => invalidCredentials())
+    const { getClientConfig } = await load()
+
+    const err = await getClientConfig(cfg).catch((e) => e)
+    expect(err.code).toBe('InvalidCredentialsException')
+    expect(err.message).toMatch(/^Invalid credentials\. Check that /)
+    expect(err.message).toMatch(/LOCATION_CLIENT_ID \("id-1"\)/)
+    expect(err.message).toMatch(/LOCATION_CLIENT_SECRET/)
+  })
+
+  it('reports a suspended application as "Application is not active", not as a credentials problem (#38)', async () => {
+    // The advice used to be added to EVERY 401 and 403, so a suspended
+    // application was told to check a secret that was fine.
+    fetchMock.mockImplementation(async () => notActive())
+    const { getClientConfig } = await load()
+
+    const err = await getClientConfig(cfg).catch((e) => e)
+    expect(err.message).toBe('Application is not active')
+    expect(err.message).not.toMatch(/LOCATION_CLIENT_SECRET/)
+    expect(err.code).toBe('InvalidCredentialsException')
+    expect(err.statusCode).toBe(401)
+  })
+
+  it('passes the gateway 401 through with its own code, and the advice names both of its causes', async () => {
+    // The authorizer answers a wrong secret and an inactive application with
+    // the same 401, so the advice cannot pick one.
+    fetchMock.mockImplementation(async () => gatewayUnauthorized())
+    const { getClientConfig } = await load()
+
+    const err = await getClientConfig(cfg).catch((e) => e)
+    expect(err.code).toBe('UnauthorizedException')
+    expect(err.message).toMatch(/^Missing, malformed, expired or revoked/)
+    expect(err.message).toMatch(/LOCATION_CLIENT_SECRET/)
+    expect(err.message).toMatch(/active/)
+  })
+
+  it("passes a 403 through unchanged: the API's message already names the cause", async () => {
     fetchMock.mockImplementation(async () =>
-      tokenErr(401, { error: 'unauthorized' }),
+      tokenErr(403, {
+        code: 'ApplicationNotActiveException',
+        message: 'The application is not active.',
+      }),
     )
     const { getClientConfig } = await load()
 
-    await expect(getClientConfig(cfg)).rejects.toMatchObject({
-      code: 'InvalidCredentialsException',
+    const err = await getClientConfig(cfg).catch((e) => e)
+    expect(err).toMatchObject({
+      code: 'ApplicationNotActiveException',
+      message: 'The application is not active.',
+      statusCode: 403,
     })
-    await expect(getClientConfig(cfg)).rejects.toThrow(
-      /LOCATION_CLIENT_ID and LOCATION_CLIENT_SECRET/,
-    )
   })
 
   it('does NOT call a store outage a credentials problem (#10)', async () => {
@@ -221,9 +283,7 @@ describe('what it says when authentication fails', () => {
   })
 
   it('keeps the original failure as the cause', async () => {
-    fetchMock.mockImplementation(async () =>
-      tokenErr(401, { error: 'unauthorized' }),
-    )
+    fetchMock.mockImplementation(async () => invalidCredentials())
     const { getClientConfig, LocationServiceException } = await load()
 
     const err = await getClientConfig(cfg).catch((e) => e)

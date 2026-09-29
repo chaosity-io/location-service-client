@@ -762,6 +762,249 @@ describe('a 401 is retried exactly once, with a fresh token (#36)', () => {
   })
 })
 
+describe('a refused token is not re-requested, or re-sent, on every call (#38)', () => {
+  const unauthorized = () => apiError(401, { message: 'Unauthorized' })
+  const notActive = () =>
+    apiError(401, {
+      error: 'invalid_client',
+      code: 'InvalidCredentialsException',
+      error_description: 'Application is not active',
+    })
+
+  let TOKEN_REFUSAL_HOLD_MS: number
+  beforeEach(async () => {
+    ;({ TOKEN_REFUSAL_HOLD_MS } = await import('../src/auth/tokenHold'))
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+  })
+  afterEach(() => vi.useRealTimers())
+
+  it('makes one token request per hold, not one per call, while the data route and /auth/token both answer 401', async () => {
+    // A suspended application: its token is refused on every data route and
+    // its credentials on /auth/token. Each send used to force a new token
+    // request, so a busy server asked /auth/token as often as it served a
+    // request, and every answer was the same refusal.
+    withEnvCredentials()
+    const { LocationServiceConnector } = await load()
+    fetchMock.mockImplementation(async (url: string) => {
+      if (!String(url).endsWith('/auth/token')) return unauthorized()
+      return issued.length ? notActive() : mintedToken()
+    })
+    const c = new LocationServiceConnector({ origin: 'https://app.example' })
+
+    for (let i = 0; i < 5; i++) {
+      await expect(
+        c.send(new SearchTextCommand({ QueryText: 'x' })),
+      ).rejects.toThrow('Application is not active')
+    }
+    // The first mint, and the one refused re-mint.
+    expect(tokenCalls()).toHaveLength(2)
+    expect(dataCalls()).toHaveLength(1)
+
+    vi.advanceTimersByTime(TOKEN_REFUSAL_HOLD_MS)
+    await expect(
+      c.send(new SearchTextCommand({ QueryText: 'x' })),
+    ).rejects.toThrow('Application is not active')
+    expect(tokenCalls()).toHaveLength(3)
+  })
+
+  it('does not re-send a fixed token the API refused, until the hold ends', async () => {
+    const { LocationServiceConnector } = await load()
+    fetchMock.mockImplementation(async () => unauthorized())
+    const c = new LocationServiceConnector({
+      apiUrl: 'https://api.test',
+      token: jwt(),
+    })
+
+    for (let i = 0; i < 3; i++) {
+      await expect(
+        c.send(new SearchTextCommand({ QueryText: 'x' })),
+      ).rejects.toMatchObject({ statusCode: 401 })
+    }
+    expect(dataCalls()).toHaveLength(1)
+
+    vi.advanceTimersByTime(TOKEN_REFUSAL_HOLD_MS)
+    await expect(
+      c.send(new SearchTextCommand({ QueryText: 'x' })),
+    ).rejects.toMatchObject({ statusCode: 401 })
+    expect(dataCalls()).toHaveLength(2)
+  })
+
+  it('ends the hold at once when the token source produces a different token', async () => {
+    const first = jwt({ seq: 1 })
+    const second = jwt({ seq: 2 })
+    let current = first
+    // One graph: the refusal must be the class the connector checks against.
+    const { LocationServiceConnector, LocationServiceException } = await load()
+    const refusal = new LocationServiceException({
+      code: 'InvalidCredentialsException',
+      message: 'Application is not active',
+      statusCode: 401,
+    })
+    fetchMock.mockImplementation(async (_url: string, init: RequestInit) =>
+      (init.headers as Record<string, string>).Authorization ===
+      `Bearer ${second}`
+        ? ok()
+        : unauthorized(),
+    )
+    const c = new LocationServiceConnector({
+      apiUrl: 'https://api.test',
+      getToken: async (forceRefresh) => {
+        if (forceRefresh) throw refusal
+        return current
+      },
+    })
+
+    await expect(
+      c.send(new SearchTextCommand({ QueryText: 'x' })),
+    ).rejects.toThrow('Application is not active')
+    await expect(
+      c.send(new SearchTextCommand({ QueryText: 'x' })),
+    ).rejects.toThrow('Application is not active')
+    expect(dataCalls()).toHaveLength(1)
+
+    current = second
+    await expect(
+      c.send(new SearchTextCommand({ QueryText: 'x' })),
+    ).resolves.toEqual({ ResultItems: [] })
+  })
+
+  it('keeps asking after a refresh that failed for a reason that says nothing, without re-sending the refused token', async () => {
+    // A network fault or a 500 carries no word from the server about when to
+    // ask again, so the next send asks the source — today's behaviour. The
+    // token itself was refused, so it is not sent again meanwhile.
+    const { LocationServiceConnector, LocationServiceException } = await load()
+    const same = jwt({ seq: 'same' })
+    const getToken = vi.fn(async (forceRefresh?: boolean) => {
+      if (forceRefresh)
+        throw new LocationServiceException({
+          code: 'NetworkException',
+          message: 'fetch failed',
+        })
+      return same
+    })
+    fetchMock.mockImplementation(async () => unauthorized())
+    const c = new LocationServiceConnector({
+      apiUrl: 'https://api.test',
+      getToken,
+    })
+
+    await expect(
+      c.send(new SearchTextCommand({ QueryText: 'x' })),
+    ).rejects.toMatchObject({ code: 'NetworkException' })
+    await expect(
+      c.send(new SearchTextCommand({ QueryText: 'x' })),
+    ).rejects.toMatchObject({ code: 'NetworkException' })
+    expect(dataCalls()).toHaveLength(1)
+    expect(getToken.mock.calls.filter(([force]) => force)).toHaveLength(2)
+  })
+
+  it('re-sends the refused token once per hold while the source keeps failing untyped', async () => {
+    const { LocationServiceConnector, LocationServiceException } = await load()
+    // Minted once: `jwt()` reads the clock, and a different token would end
+    // the hold for the wrong reason.
+    const refused = jwt({ seq: 'refused' })
+    const getToken = vi.fn(async (forceRefresh?: boolean) => {
+      if (forceRefresh)
+        throw new LocationServiceException({
+          code: 'NetworkException',
+          message: 'fetch failed',
+        })
+      return refused
+    })
+    fetchMock.mockImplementation(async () => unauthorized())
+    const c = new LocationServiceConnector({
+      apiUrl: 'https://api.test',
+      getToken,
+    })
+
+    // Sends two-thirds of a hold apart: a hold that slid forward on each one
+    // would still stand at the third.
+    const step = (TOKEN_REFUSAL_HOLD_MS * 2) / 3
+    for (let i = 0; i < 2; i++) {
+      await expect(
+        c.send(new SearchTextCommand({ QueryText: 'x' })),
+      ).rejects.toMatchObject({ code: 'NetworkException' })
+      vi.advanceTimersByTime(step)
+    }
+    expect(dataCalls()).toHaveLength(1)
+
+    await expect(
+      c.send(new SearchTextCommand({ QueryText: 'x' })),
+    ).rejects.toMatchObject({ code: 'NetworkException' })
+    expect(dataCalls()).toHaveLength(2)
+    expect(getToken.mock.calls.filter(([force]) => force)).toHaveLength(3)
+  })
+
+  it('keeps the original refusal while the source fails untyped, not a chain of replays', async () => {
+    const { LocationServiceConnector, LocationServiceException } = await load()
+    const refused = jwt({ seq: 'refused' })
+    let forced = 0
+    const c = new LocationServiceConnector({
+      apiUrl: 'https://api.test',
+      getToken: async (forceRefresh?: boolean) => {
+        if (!forceRefresh) return refused
+        forced += 1
+        if (forced <= 3)
+          throw new LocationServiceException({
+            code: 'NetworkException',
+            message: 'fetch failed',
+          })
+        return refused
+      },
+    })
+    fetchMock.mockImplementation(async () => unauthorized())
+
+    for (let i = 0; i < 3; i++) {
+      await expect(
+        c.send(new SearchTextCommand({ QueryText: 'x' })),
+      ).rejects.toMatchObject({ code: 'NetworkException' })
+    }
+    const err = await c
+      .send(new SearchTextCommand({ QueryText: 'x' }))
+      .catch((e) => e)
+    expect(err.statusCode).toBe(401)
+    expect(err.cause.cause).toBeUndefined()
+  })
+
+  it('sends the replacement straight away when the source recovers, without the refused token first', async () => {
+    const { LocationServiceConnector, LocationServiceException } = await load()
+    const refused = jwt({ seq: 'refused' })
+    const fresh = jwt({ seq: 'fresh' })
+    let forced = 0
+    const getToken = vi.fn(async (forceRefresh?: boolean) => {
+      if (!forceRefresh) return refused
+      forced += 1
+      if (forced === 1)
+        throw new LocationServiceException({
+          code: 'NetworkException',
+          message: 'fetch failed',
+        })
+      return fresh
+    })
+    fetchMock.mockImplementation(async (_url: string, init: RequestInit) =>
+      (init.headers as Record<string, string>).Authorization ===
+      `Bearer ${fresh}`
+        ? ok()
+        : unauthorized(),
+    )
+    const c = new LocationServiceConnector({
+      apiUrl: 'https://api.test',
+      getToken,
+    })
+
+    await expect(
+      c.send(new SearchTextCommand({ QueryText: 'x' })),
+    ).rejects.toMatchObject({ code: 'NetworkException' })
+    await expect(
+      c.send(new SearchTextCommand({ QueryText: 'x' })),
+    ).resolves.toEqual({ ResultItems: [] })
+    expect(dataCalls().map(([, init]) => init.headers.Authorization)).toEqual([
+      `Bearer ${refused}`,
+      `Bearer ${fresh}`,
+    ])
+  })
+})
+
 describe('a 403 on a request that carried no Origin says so (#45)', () => {
   const originDenied = () =>
     apiError(403, {

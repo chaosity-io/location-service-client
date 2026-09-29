@@ -13,9 +13,71 @@
  */
 export const FEATURE_NOT_ENTITLED = 'FeatureNotEntitledException'
 
+/**
+ * Every `code` the API sends (#38): its error contract, published at
+ * https://docs.chaosity.cloud/api/errors, plus the Amazon Location exception
+ * names it passes through from upstream.
+ *
+ * A few are worth knowing apart. `RateLimitExceededException` is the
+ * application's own throttle; `ThrottlingException` is Amazon Location
+ * throttling the service; `IpRateLimitExceededException` is the per-address
+ * limit in front of `/auth/token`. `ApplicationNotActiveException` (403) is an
+ * application that is new, suspended or off its plan.
+ * `TokenExpiredException` is in the contract but never sent: an expired token
+ * arrives as `UnauthorizedException`.
+ */
+export const API_ERROR_CODES = [
+  'AccessDeniedException',
+  'ApplicationNotActiveException',
+  'ClientException',
+  'FeatureNotEntitledException',
+  'ForbiddenException',
+  'InternalException',
+  'InternalServerException',
+  'InvalidCredentialsException',
+  'IpRateLimitExceededException',
+  'NotAcceptableException',
+  'NotFoundException',
+  'OriginNotAllowedException',
+  'RateLimitExceededException',
+  'ResourceNotFoundException',
+  'ServiceUnavailableException',
+  'ThrottlingException',
+  'TimeoutException',
+  'TokenExpiredException',
+  'UnauthorizedException',
+  'UpstreamException',
+  'ValidationException',
+] as const
+
+/**
+ * The codes only this package raises, for failures that never reached the
+ * API. It raises some of the API's codes too — `TimeoutException` for its own
+ * timeout, `InvalidCredentialsException` for a missing token — and those are
+ * in the list above.
+ */
+export const CLIENT_ERROR_CODES = [
+  'AbortedException',
+  'NetworkException',
+  'ServiceException',
+  'UnknownCommandException',
+] as const
+
+export const LOCATION_SERVICE_ERROR_CODES = [
+  ...API_ERROR_CODES,
+  ...CLIENT_ERROR_CODES,
+] as const
+
+/**
+ * A `LocationServiceException`'s `code`: one of these, or a code the API adds
+ * after this release, which arrives all the same.
+ */
+export type LocationServiceErrorCode =
+  (typeof LOCATION_SERVICE_ERROR_CODES)[number]
+
 export interface LocationServiceExceptionOptions {
   message: string
-  code: string
+  code: LocationServiceErrorCode | (string & {})
   /** Absent for failures that never reached the server: network, timeout, abort. */
   statusCode?: number
   requestId?: string
@@ -34,7 +96,8 @@ export interface LocationServiceExceptionOptions {
  * rather than sniffing at `TypeError` vs `DOMException` vs a bare `Error`.
  */
 export class LocationServiceException extends Error {
-  readonly code: string
+  /** See `LocationServiceErrorCode`: typed, and open to a code added later. */
+  readonly code: LocationServiceErrorCode | (string & {})
   readonly statusCode?: number
   readonly requestId?: string
   readonly details?: Record<string, unknown>

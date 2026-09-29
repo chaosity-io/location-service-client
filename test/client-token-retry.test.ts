@@ -1,6 +1,8 @@
 import { SearchTextCommand } from '@aws-sdk/client-geo-places'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { TOKEN_REFUSAL_HOLD_MS } from '../src/auth/tokenHold'
 import { GeoPlacesClient } from '../src/client/GeoPlacesClient'
+import { LocationServiceException } from '../src/errors/LocationServiceException'
 
 /**
  * The browser client's half of #36: recovering from a token the API has stopped
@@ -267,5 +269,272 @@ describe('a client with no token at all never sends Bearer undefined (#37)', () 
 
     expect(err.code).toBe('InvalidCredentialsException')
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('a refused token is not re-sent, nor its refresh re-asked, on every send (#38)', () => {
+  beforeEach(() => vi.useFakeTimers({ shouldAdvanceTime: true }))
+  afterEach(() => vi.useRealTimers())
+
+  const notActive = () =>
+    new LocationServiceException({
+      code: 'InvalidCredentialsException',
+      message: 'Application is not active',
+      statusCode: 401,
+    })
+
+  it('asks a rejecting refreshToken once per hold, not once per send', async () => {
+    // A suspended application: the data route refuses the token, and the
+    // refresh — under @chaosity/location-client-react, the application's own
+    // token route — is refused too. Each send used to repeat both.
+    fetchMock.mockImplementation(async () => unauthorized())
+    const refreshToken = vi.fn(async () => {
+      throw notActive()
+    })
+    const client = new GeoPlacesClient({
+      apiUrl: API,
+      token: 'refused',
+      refreshToken,
+    })
+
+    for (let i = 0; i < 5; i++) {
+      await expect(
+        client.send(new SearchTextCommand({ QueryText: 'x' })),
+      ).rejects.toThrow('Application is not active')
+    }
+    expect(refreshToken).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    vi.advanceTimersByTime(TOKEN_REFUSAL_HOLD_MS)
+    await expect(
+      client.send(new SearchTextCommand({ QueryText: 'x' })),
+    ).rejects.toThrow('Application is not active')
+    expect(refreshToken).toHaveBeenCalledTimes(2)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not re-send a token the API refused when the refresh has nothing new', async () => {
+    fetchMock.mockImplementation(async () => unauthorized())
+    const client = new GeoPlacesClient({
+      apiUrl: API,
+      token: 'refused',
+      refreshToken: async () => 'refused',
+    })
+
+    for (let i = 0; i < 3; i++) {
+      await expect(
+        client.send(new SearchTextCommand({ QueryText: 'x' })),
+      ).rejects.toMatchObject({ statusCode: 401 })
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('ends the hold at once when getToken yields a different token', async () => {
+    let current = 'refused'
+    fetchMock.mockImplementation(async (_url: string, init: RequestInit) =>
+      (init.headers as Record<string, string>).Authorization === 'Bearer fresh'
+        ? ok()
+        : unauthorized(),
+    )
+    const client = new GeoPlacesClient({
+      apiUrl: API,
+      getToken: () => current,
+      refreshToken: async () => {
+        throw notActive()
+      },
+    })
+
+    await expect(
+      client.send(new SearchTextCommand({ QueryText: 'x' })),
+    ).rejects.toThrow('Application is not active')
+    current = 'fresh'
+    await expect(
+      client.send(new SearchTextCommand({ QueryText: 'x' })),
+    ).resolves.toEqual({ ResultItems: [] })
+  })
+
+  it('asks again after a refresh that failed for a reason that says nothing, without re-sending the refused token', async () => {
+    fetchMock.mockImplementation(async () => unauthorized())
+    const refreshToken = vi.fn(async (): Promise<string> => {
+      throw new TypeError('fetch failed')
+    })
+    const client = new GeoPlacesClient({
+      apiUrl: API,
+      token: 'refused',
+      refreshToken,
+    })
+
+    await expect(
+      client.send(new SearchTextCommand({ QueryText: 'x' })),
+    ).rejects.toThrow('fetch failed')
+    await expect(
+      client.send(new SearchTextCommand({ QueryText: 'x' })),
+    ).rejects.toThrow('fetch failed')
+    expect(refreshToken).toHaveBeenCalledTimes(2)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not re-send a refused token when the refresh is a Server Action that rejects without fields', async () => {
+    // Under @chaosity/location-client-react, the refresh is the application's
+    // `getConfig`, and a Server Action's error reaches the browser as a plain
+    // Error: its status and code do not cross. So nothing says how long to
+    // wait, and each send asks the provider again — which answers from its
+    // own back-off — but the token the API refused is not sent again.
+    fetchMock.mockImplementation(async () => unauthorized())
+    const refreshToken = vi.fn(async (): Promise<string> => {
+      throw new Error('An error occurred in the Server Components render.')
+    })
+    const client = new GeoPlacesClient({
+      apiUrl: API,
+      token: 'refused',
+      refreshToken,
+    })
+
+    for (let i = 0; i < 3; i++) {
+      await expect(
+        client.send(new SearchTextCommand({ QueryText: 'x' })),
+      ).rejects.toThrow('Server Components render')
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(refreshToken).toHaveBeenCalledTimes(3)
+  })
+
+  it('re-sends the refused token once per hold while the refresh keeps failing untyped', async () => {
+    // The hold has an end. Remembered again on every send, it slid forward for
+    // as long as the refresh kept failing, and an application made active
+    // again was never noticed.
+    fetchMock.mockImplementation(async () => unauthorized())
+    const refreshToken = vi.fn(async (): Promise<string> => {
+      throw new TypeError('fetch failed')
+    })
+    const client = new GeoPlacesClient({
+      apiUrl: API,
+      token: 'refused',
+      refreshToken,
+    })
+
+    // Sends two-thirds of a hold apart: a hold that slid forward on each one
+    // would still stand at the third.
+    const step = (TOKEN_REFUSAL_HOLD_MS * 2) / 3
+    for (let i = 0; i < 2; i++) {
+      await expect(
+        client.send(new SearchTextCommand({ QueryText: 'x' })),
+      ).rejects.toThrow('fetch failed')
+      vi.advanceTimersByTime(step)
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    await expect(
+      client.send(new SearchTextCommand({ QueryText: 'x' })),
+    ).rejects.toThrow('fetch failed')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(refreshToken).toHaveBeenCalledTimes(3)
+  })
+
+  it('keeps the original refusal while the refresh fails untyped, not a chain of replays', async () => {
+    fetchMock.mockImplementation(async () => unauthorized())
+    let asked = 0
+    const client = new GeoPlacesClient({
+      apiUrl: API,
+      token: 'refused',
+      refreshToken: async () => {
+        asked += 1
+        if (asked <= 3) throw new TypeError('fetch failed')
+        return 'refused'
+      },
+    })
+
+    for (let i = 0; i < 3; i++) {
+      await expect(
+        client.send(new SearchTextCommand({ QueryText: 'x' })),
+      ).rejects.toThrow('fetch failed')
+    }
+    // The refresh now hands back the refused token: the held 401 is thrown.
+    const err = await client
+      .send(new SearchTextCommand({ QueryText: 'x' }))
+      .catch((e) => e)
+    expect(err.statusCode).toBe(401)
+    expect((err.cause as LocationServiceException).cause).toBeUndefined()
+  })
+
+  it('sends the replacement straight away when the refresh recovers, without the refused token first', async () => {
+    fetchMock.mockImplementation(async (_url: string, init: RequestInit) =>
+      (init.headers as Record<string, string>).Authorization === 'Bearer fresh'
+        ? ok()
+        : unauthorized(),
+    )
+    let calls = 0
+    const client = new GeoPlacesClient({
+      apiUrl: API,
+      token: 'refused',
+      refreshToken: async () => {
+        calls += 1
+        if (calls === 1) throw new TypeError('fetch failed')
+        return 'fresh'
+      },
+    })
+
+    await expect(
+      client.send(new SearchTextCommand({ QueryText: 'x' })),
+    ).rejects.toThrow('fetch failed')
+    await expect(
+      client.send(new SearchTextCommand({ QueryText: 'x' })),
+    ).resolves.toEqual({ ResultItems: [] })
+    expect(authHeaders()).toEqual(['Bearer refused', 'Bearer fresh'])
+  })
+})
+
+describe('a client with no token holds a refusing refreshToken too (#38)', () => {
+  beforeEach(() => vi.useFakeTimers({ shouldAdvanceTime: true }))
+  afterEach(() => vi.useRealTimers())
+
+  it('asks refreshToken once per hold before the first send, not once per send', async () => {
+    // The pre-flight: nothing in hand, so refreshToken is asked before a send.
+    // A refusal there used to be asked again on every send.
+    const refreshToken = vi.fn(async (): Promise<string> => {
+      throw new LocationServiceException({
+        code: 'InvalidCredentialsException',
+        message: 'Application is not active',
+        statusCode: 401,
+      })
+    })
+    const client = new GeoPlacesClient({ apiUrl: API, refreshToken })
+
+    for (let i = 0; i < 3; i++) {
+      await expect(
+        client.send(new SearchTextCommand({ QueryText: 'x' })),
+      ).rejects.toThrow('Application is not active')
+    }
+    expect(refreshToken).toHaveBeenCalledTimes(1)
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    vi.advanceTimersByTime(TOKEN_REFUSAL_HOLD_MS)
+    await expect(
+      client.send(new SearchTextCommand({ QueryText: 'x' })),
+    ).rejects.toThrow('Application is not active')
+    expect(refreshToken).toHaveBeenCalledTimes(2)
+  })
+
+  it('ends that hold as soon as getToken has a token', async () => {
+    const source: { current?: string } = {}
+    const client = new GeoPlacesClient({
+      apiUrl: API,
+      getToken: () => source.current,
+      refreshToken: async () => {
+        throw new LocationServiceException({
+          code: 'InvalidCredentialsException',
+          message: 'Application is not active',
+          statusCode: 401,
+        })
+      },
+    })
+
+    await expect(
+      client.send(new SearchTextCommand({ QueryText: 'x' })),
+    ).rejects.toThrow('Application is not active')
+    source.current = 'arrived'
+    await expect(
+      client.send(new SearchTextCommand({ QueryText: 'x' })),
+    ).resolves.toEqual({ ResultItems: [] })
   })
 })

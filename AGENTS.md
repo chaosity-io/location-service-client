@@ -149,15 +149,17 @@ succeed, which triggers `publish.yml` via `workflow_run`, which publishes with
 npm provenance. Merging is what publishes — there is no manual `npm publish`
 step, and `prepublishOnly` runs the build.
 
-## Treat `ARCHITECTURE.md` and `README.md` with suspicion
+## The Markdown is held to `src/`
 
-Both carry known inaccuracies, tracked in **#8**: `ARCHITECTURE.md` documents
-`AuthHelper` / `AuthClient` classes that do not exist and names a package this
-library does not depend on; the README advertises routing and tracking
-utilities this API does not proxy.
-
-Verify against `src/` before relying on either, and prefer fixing them over
-working around them.
+`ARCHITECTURE.md` used to document auth classes that never existed and a
+package this library does not depend on, and the README offered GeoJSON
+converters for APIs this service does not serve (#8). `test/docs-truth.test.ts`
+now reads every `.md` file at the root: every name a code block imports from
+this package must compile against `src/`, and every `…ToFeatureCollection`
+converter named anywhere must take a Places response. A claim in prose that no
+guard can check — a host, a behaviour — is checked against `src/` by hand
+before it is written. Where a doc and `src/` disagree, `src/` is right:
+fix the doc.
 
 ## Conventions
 
@@ -300,6 +302,34 @@ working around them.
   the API's 403s (Origin not allowed, no domain configured) cannot be fixed by a
   new token, and re-sending a doomed request sends it twice. `isTokenRejected`
   in `transport/errors.ts` is the single place that decides.
+- **A refusal is remembered, not asked again (#38).** A suspended application
+  is refused on every data route AND on `/auth/token`, and nothing used to
+  remember either: every send paid a refused data request and a refused token
+  request, all against the application's own token-route throttle. So every
+  place that asks again holds a `TokenHold` (`auth/tokenHold.ts`):
+  `TokenProvider.getToken`, the 401 retry in each send path, and
+  `GeoPlacesClient`'s pre-flight `refreshToken` when it holds no token. A
+  refusal (401 or 403) is re-thrown from memory for `TOKEN_REFUSAL_HOLD_MS`,
+  and a `Retry-After` for as long as it asks (#63). A failure that carries
+  neither — a network fault, a 500, or a Server Action's error, which reaches
+  the browser without its fields — is asked again at once, but a send path
+  does not re-send the token the API refused meanwhile (`askAgain`). A send path
+  keys the hold to the token it refused, so a different token ends it.
+  `holdFor` is the one place that decides how long; another place that asks a
+  token source again after a failure must use it, not a copy.
+- **Every `code` is a `LocationServiceErrorCode` (#38).** The API's half is its
+  published error contract, and the list is re-read from it when the contract
+  changes; this package's own half is enumerable, and
+  `test/error-codes.test.ts` walks `src/` for every `…Exception` string and
+  requires it in the list. A new code raised here goes into
+  `CLIENT_ERROR_CODES`, or into `API_ERROR_CODES` if the API sends it too.
+- **An error's `message` is the API's sentence.** `parseErrorResponse` reads
+  `/auth/token`'s `error_description` whatever else the body carries, and
+  `getClientConfig` passes the API's code and sentence through, adding its
+  credentials advice only to a refusal of the credentials themselves. Every
+  401 and 403 used to become "Verify LOCATION_CLIENT_ID and
+  LOCATION_CLIENT_SECRET", which sent a suspended application to check a
+  secret that was fine.
 - **An error response is not billed, whatever its status.** The service meters
   successful requests, so a 401, a 403 or a 400 costs the caller a round trip and
   its own deadline — not money. Worth checking before writing "and it is billed"

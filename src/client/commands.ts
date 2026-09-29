@@ -196,9 +196,8 @@ export interface VerifyAddressCommandInput {
  * Japan, which may not be stored at all. Every other Places result is for
  * display.
  *
- * Keep the PlaceId you sent beside it. The answer's own `PlaceId` can differ,
- * and for a unit it does: the service fails that one on every Places route,
- * while the one you sent verifies again.
+ * Its `PlaceId` is the one sent, for a unit as for a building, so a stored
+ * verification can be verified, or looked up, again by its own `PlaceId`.
  */
 export type VerifyAddressResponse = Omit<GetPlaceResponse, 'PricingBucket'> & {
   /**

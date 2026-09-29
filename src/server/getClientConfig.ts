@@ -114,6 +114,41 @@ export function resolveApiUrl(explicit?: string): string | undefined {
 }
 
 /**
+ * A refusal of the client credentials themselves, as opposed to a refusal
+ * whose sentence already names its cause.
+ *
+ * Two answers qualify. `/auth/token`'s own `Invalid credentials` is a secret
+ * that matched nothing. The gateway's 401 (`UnauthorizedException`) is the
+ * authorizer refusing the Basic pair before `/auth/token` runs, and it gives
+ * the same answer for a wrong secret and for an application that is not
+ * active, so the advice for it names both. `Application is not active`, and
+ * every 403, is left as the API wrote it.
+ */
+function isCredentialsRefusal(
+  error: unknown,
+): error is LocationServiceException {
+  if (!(error instanceof LocationServiceException)) return false
+  if (error.statusCode !== 401) return false
+  return (
+    error.code === 'UnauthorizedException' ||
+    error.message === 'Invalid credentials'
+  )
+}
+
+/** The API's words as a sentence, so the advice can follow them. */
+const sentence = (text: string) => (/[.!?]$/.test(text) ? text : `${text}.`)
+
+function credentialsAdvice(
+  clientId: string,
+  error: LocationServiceException,
+): string {
+  const check = `Check that LOCATION_CLIENT_ID ("${clientId}") and LOCATION_CLIENT_SECRET match your application in the developer portal`
+  return error.code === 'UnauthorizedException'
+    ? `${check}, and that the application is active there.`
+    : `${check}.`
+}
+
+/**
  * A LIVE token source: resolved credentials plus a `getToken` that re-mints
  * when the cached token is spent.
  *
@@ -187,22 +222,20 @@ export function serverTokenSource(
       try {
         result = await provider.getToken(forceRefresh)
       } catch (error) {
-        // The provider now rejects rather than resolving with success:false, and
-        // the rejection is typed — so a store outage (503) can be reported as a
-        // store outage instead of as bad credentials.
-        if (error instanceof LocationServiceException) {
-          if (error.isAuth) {
-            throw new LocationServiceException({
-              code: 'InvalidCredentialsException',
-              message:
-                `Authentication failed for client ID "${clientId}". ` +
-                `Verify LOCATION_CLIENT_ID and LOCATION_CLIENT_SECRET match your application in the developer portal.`,
-              statusCode: error.statusCode,
-              requestId: error.requestId,
-              cause: error,
-            })
-          }
-          throw error
+        // The API's code and sentence, passed through (#38). Every 401 and 403
+        // used to become "Verify LOCATION_CLIENT_ID and LOCATION_CLIENT_SECRET",
+        // which sent a suspended application to check a secret that was fine.
+        // The advice is added only where the credentials are what was refused.
+        if (isCredentialsRefusal(error)) {
+          throw new LocationServiceException({
+            code: error.code,
+            message: `${sentence(error.message)} ${credentialsAdvice(clientId, error)}`,
+            statusCode: error.statusCode,
+            requestId: error.requestId,
+            details: error.details,
+            retryAfterMs: error.retryAfterMs,
+            cause: error,
+          })
         }
         throw error
       }
@@ -262,8 +295,9 @@ export function serverTokenSource(
  * // Auto-detect from environment
  * const config = await getClientConfig()
  *
- * // Or override specific values
- * const config = await getClientConfig({ apiUrl: 'https://custom.api.com' })
+ * // Or override specific values — the API URL is the one on the
+ * // application's page in the developer portal
+ * const config = await getClientConfig({ apiUrl: 'https://your-api-url.example' })
  *
  * // The API rejected the token before its exp — revoked, or secret rotated
  * const fresh = await getClientConfig({ forceRefresh: true })
