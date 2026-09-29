@@ -1,4 +1,5 @@
 import debug from 'debug'
+import { TokenHold, holdFor } from '../auth/tokenHold.js'
 import { resolveEndpoint } from '../transport/endpoints.js'
 import { isTokenRejected, noTokenAvailable } from '../transport/errors.js'
 import type { RequestOptions } from '../transport/http.js'
@@ -14,15 +15,25 @@ const log = debug('location-client:api')
 export type SendOptions = RequestOptions
 
 /**
+ * What a hold is kept against when there was no token in hand to key it to.
+ * `ensureToken` treats an empty token as none, so no real token is this.
+ */
+const NO_TOKEN = ''
+
+/**
  * GeoPlacesClient — AWS Location Service compatible client with custom auth.
  *
- * Uses AWS SDK command classes but replaces SigV4 with a Bearer token. All
- * request and response types are identical to AWS Location Service.
+ * Uses AWS SDK command classes but replaces SigV4 with a Bearer token. The
+ * request and response types are the AWS SDK's, except that the Places
+ * commands take neither `IntendedUse` nor `Key` (#40), and `VerifyAddressCommand`
+ * is this package's own (#54).
  *
  * Pass `getToken` in config for live refresh without recreating the client.
  */
 export class GeoPlacesClient {
   private clientConfig: ClientConfig
+  /** A token the API refused, and why, until the hold lapses (#38). */
+  private readonly refused = new TokenHold()
   public readonly config: { serviceId: string }
 
   constructor(config: ClientConfig) {
@@ -62,13 +73,26 @@ export class GeoPlacesClient {
    * client configured the ordinary way pays nothing for this.
    */
   private async ensureToken(): Promise<string> {
-    // `||`, not `??`: an empty string is a token source with nothing to give,
-    // not a decision to send an empty one. With `??` it survived the coalesce,
-    // skipped `refreshToken`, and then failed the check two lines below — so
+    // Truthiness, not `??`: an empty string is a token source with nothing to
+    // give, not a decision to send an empty one. With `??` it survived the
+    // coalesce, skipped `refreshToken`, and then failed the check below — so
     // `getToken: () => undefined` got the refresh ask and `getToken: () => ''`
     // did not, which is a distinction no caller means to draw.
-    const token =
-      this.currentToken() || (await this.clientConfig.refreshToken?.())
+    const inHand = this.currentToken()
+    if (inHand) return inHand
+
+    // `refreshToken` refused a moment ago, and there is still nothing in hand:
+    // answer with that rather than ask it again on every send (#38). The hold
+    // is kept against "no token", so one arriving from `getToken` ends it.
+    const held = this.refused.check(NO_TOKEN)?.error
+    if (held) throw held
+    let token: string | undefined
+    try {
+      token = await this.clientConfig.refreshToken?.()
+    } catch (refusal) {
+      this.refused.remember(refusal, NO_TOKEN)
+      throw refusal
+    }
     if (!token) {
       throw noTokenAvailable(
         'the client has no token yet. Pass `token`, or a `getToken`/`refreshToken` that has one.',
@@ -98,28 +122,56 @@ export class GeoPlacesClient {
     // there is still nothing.
     const token = await this.ensureToken()
 
+    // This token was refused a moment ago and nothing has replaced it: answer
+    // with that refusal rather than send it, and ask `refreshToken`, again
+    // (#38). A different token from `getToken` ends the hold. When the refresh
+    // that followed said nothing about when to ask again, it is asked now —
+    // but the refused token is still not sent.
+    const held = this.refused.check(token)
+    if (held && !held.askAgain) throw held.error
+
+    let rejected: unknown = held?.error
+    if (!held) {
+      try {
+        return await this.dispatch<TOutput>(url, token, cmd, options)
+      } catch (err) {
+        if (!isTokenRejected(err)) throw err
+        rejected = err
+      }
+    }
+
+    // One shot. `refreshToken` is the only way to actually obtain a new token
+    // here — `getToken` is synchronous and returns the one already in hand —
+    // but it is re-read as a fallback because a provider that refreshes in the
+    // background may have landed a new one while this request was in flight.
+    let fresh: string | undefined
     try {
-      return await this.dispatch<TOutput>(url, token, cmd, options)
-    } catch (err) {
-      if (!isTokenRejected(err)) throw err
+      fresh = (await this.clientConfig.refreshToken?.()) ?? this.currentToken()
+    } catch (refusal) {
+      // A suspended application's token route refuses it as its data routes
+      // refuse its token. Without this, every send asked again. A refusal that
+      // says nothing — a network fault, or a Server Action's error without its
+      // fields — leaves the source to be asked again, but not the token sent.
+      if (holdFor(refusal) > 0) this.refused.remember(refusal, token)
+      // Only when no hold stands: one already standing keeps its own end, so
+      // the refused token is tried again once per hold rather than never.
+      else if (!held) this.refused.remember(rejected, token, { askAgain: true })
+      throw refusal
+    }
 
-      // One shot. `refreshToken` is the only way to actually obtain a new
-      // token here — `getToken` is synchronous and returns the one already in
-      // hand — but it is re-read as a fallback because a provider that
-      // refreshes in the background may have landed a new one while this
-      // request was in flight.
-      const fresh =
-        (await this.clientConfig.refreshToken?.()) ?? this.currentToken()
+    // Nothing new to send. Repeating the request would fail identically — a
+    // second round trip for the same 401.
+    if (!fresh || fresh === token) {
+      this.refused.remember(rejected, token)
+      throw rejected
+    }
 
-      // Nothing new to send. Repeating the request would fail identically — a
-      // second round trip for the same 401.
-      if (!fresh || fresh === token) throw err
-
-      log(
-        '401 — retrying %s once with a refreshed token',
-        cmd.constructor?.name,
-      )
+    log('401 — retrying %s once with a refreshed token', cmd.constructor?.name)
+    try {
       return await this.dispatch<TOutput>(url, fresh, cmd, options)
+    } catch (again) {
+      if (isTokenRejected(again)) this.refused.remember(again, fresh)
+      throw again
     }
   }
 

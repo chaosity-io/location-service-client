@@ -255,13 +255,68 @@ describe('error envelope parsing (legacy tolerance)', () => {
       'Service Unavailable',
       JSON.stringify({
         error: 'temporarily_unavailable',
+        code: 'ServiceUnavailableException',
         error_description: 'Authentication store unavailable',
+        requestId: 'r-2',
       }),
     )
     expect(e.code).toBe('ServiceUnavailableException')
     expect(e.message).toBe('Authentication store unavailable')
+    expect(e.requestId).toBe('r-2')
     expect(e.isRetryable).toBe(true)
     expect(e.isAuth).toBe(false)
+  })
+
+  it('keeps the description of a /auth/token 401 that carries a code (#38)', () => {
+    // /auth/token sends its `code` beside the OAuth `error` and
+    // `error_description`, and the description is the only field that says
+    // why. It used to be read only when the body had no `code`, so every
+    // refusal from /auth/token arrived as "Request failed: Unauthorized" — a
+    // suspended application indistinguishable from a wrong secret.
+    const e = parseErrorResponse(
+      401,
+      'Unauthorized',
+      JSON.stringify({
+        error: 'invalid_client',
+        code: 'InvalidCredentialsException',
+        error_description: 'Application is not active',
+        requestId: 'r-3',
+      }),
+    )
+    expect(e.message).toBe('Application is not active')
+    expect(e.code).toBe('InvalidCredentialsException')
+    expect(e.details).toEqual({ oauthError: 'invalid_client' })
+  })
+
+  it('still maps the OAuth error to a code for a body that has none', () => {
+    const e = parseErrorResponse(
+      400,
+      'Bad Request',
+      JSON.stringify({
+        error: 'unsupported_grant_type',
+        error_description: 'Only client_credentials grant type is supported',
+      }),
+    )
+    expect(e.code).toBe('ValidationException')
+    expect(e.message).toBe('Only client_credentials grant type is supported')
+  })
+
+  it("keeps the gateway 401's message, which carries no description", () => {
+    // The gateway's own 401 on /auth/token carries `error` for OAuth clients,
+    // and its sentence is in `message`.
+    const e = parseErrorResponse(
+      401,
+      'Unauthorized',
+      JSON.stringify({
+        code: 'UnauthorizedException',
+        error: 'invalid_client',
+        message: 'Missing, malformed, expired or revoked credentials.',
+      }),
+    )
+    expect(e.code).toBe('UnauthorizedException')
+    expect(e.message).toBe(
+      'Missing, malformed, expired or revoked credentials.',
+    )
   })
 
   it('synthesises a code for a bare gateway body', () => {

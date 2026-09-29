@@ -234,3 +234,122 @@ describe('results carry what the geocoder control renders', () => {
     expect(result).toEqual({ type: 'FeatureCollection', features: [] })
   })
 })
+
+/**
+ * A geocoder `bbox` (#59).
+ *
+ * Suggest takes exactly one of `BiasPosition`, `Filter.BoundingBox` and
+ * `Filter.Circle`, and answers anything else 400 ValidationException: "Exactly
+ * one of the following fields must be set". `getSuggestions` always sent a
+ * bias, and added the box beside it when the control carried one, so an
+ * integrator who set MapLibre Geocoder's `bbox` saw no suggestions at all.
+ * Geocode has no box filter, so `forwardGeocode` sent none and returned
+ * whatever the bias found, outside the box included.
+ */
+describe('a geocoder bbox', () => {
+  const box = [152.95, -27.55, 153.1, -27.4]
+
+  it('getSuggestions with a bbox sends Filter.BoundingBox and no BiasPosition', async () => {
+    sent.length = 0
+    await adapter().getSuggestions({
+      query: 'george st',
+      bbox: box,
+      proximity: [151.209, -33.869],
+    } as never)
+    expect(lastInput()).not.toHaveProperty('BiasPosition')
+    expect(lastInput().Filter).toEqual({ BoundingBox: box })
+  })
+
+  it('keeps a country filter beside the box', async () => {
+    sent.length = 0
+    await adapter().getSuggestions({
+      query: 'george st',
+      bbox: box,
+      countries: 'AU,NZ',
+    } as never)
+    expect(lastInput()).not.toHaveProperty('BiasPosition')
+    expect(lastInput().Filter).toEqual({
+      BoundingBox: box,
+      IncludeCountries: ['AU', 'NZ'],
+    })
+  })
+
+  it('getSuggestions without a bbox sends BiasPosition: proximity, else the map centre', async () => {
+    sent.length = 0
+    await adapter().getSuggestions({
+      query: 'george st',
+      proximity: [150.5, -34.1],
+    } as never)
+    expect(lastInput().BiasPosition).toEqual([150.5, -34.1])
+    expect(lastInput()).not.toHaveProperty('Filter')
+
+    await adapter().getSuggestions({ query: 'george st' } as never)
+    expect(lastInput().BiasPosition).toEqual([151.209, -33.869])
+  })
+
+  describe('forwardGeocode', () => {
+    const at = (Position: [number, number]) => ({
+      PlaceId: `p-${Position.join(',')}`,
+      PlaceType: 'Street',
+      Title: `George St ${Position.join(',')}`,
+      Address: { Label: `George St ${Position.join(',')}` },
+      Position,
+    })
+    const clientReturning = (ResultItems: unknown[]) =>
+      ({ send: async () => ({ ResultItems }) }) as unknown as GeoPlacesClient
+
+    it('drops results outside the bbox', async () => {
+      const gp = new GeoPlaces(
+        clientReturning([
+          at([151.20691, -33.86974]), // Sydney
+          at([153.02351, -27.47092]), // inside
+          at([153.20172, -27.71601]), // east and south of it
+        ]),
+        fakeMap as never,
+      )
+      const { features } = await gp.forwardGeocode({
+        query: 'George St',
+        bbox: box,
+      } as never)
+      expect(features.map((f) => f.center)).toEqual([[153.02351, -27.47092]])
+    })
+
+    it('keeps a result on the edge of the box', async () => {
+      const gp = new GeoPlaces(
+        clientReturning([at([152.95, -27.4])]),
+        fakeMap as never,
+      )
+      const { features } = await gp.forwardGeocode({
+        query: 'George St',
+        bbox: box,
+      } as never)
+      expect(features).toHaveLength(1)
+    })
+
+    it('reads a box that crosses the antimeridian as the box it is', async () => {
+      // [minX, minY, maxX, maxY] with minX > maxX: from 170° east across
+      // 180° to 170° west.
+      const gp = new GeoPlaces(
+        clientReturning([at([175, -40]), at([-175, -40]), at([0, -40])]),
+        fakeMap as never,
+      )
+      const { features } = await gp.forwardGeocode({
+        query: 'x',
+        bbox: [170, -45, -170, -35],
+      } as never)
+      expect(features.map((f) => f.center)).toEqual([
+        [175, -40],
+        [-175, -40],
+      ])
+    })
+
+    it('returns everything when there is no bbox', async () => {
+      const gp = new GeoPlaces(
+        clientReturning([at([151.20691, -33.86974]), at([153.02, -27.47])]),
+        fakeMap as never,
+      )
+      const { features } = await gp.forwardGeocode({ query: 'x' } as never)
+      expect(features).toHaveLength(2)
+    })
+  })
+})

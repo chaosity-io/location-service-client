@@ -43,14 +43,15 @@ its worker set up once under a bundler: see [The MapLibre worker](#the-maplibre-
 ## Key Features
 
 - **Custom Authentication**: Uses Bearer tokens instead of AWS SigV4
-- **AWS SDK Commands**: Full access to all AWS Location Service commands
+- **Places Commands**: the seven Amazon Location Places commands from `@aws-sdk/client-geo-places`, plus `VerifyAddressCommand`
 - **Address Verification**: `verifyAddress(placeId)` returns the one Places result you may store — see [Verifying an address](#verifying-an-address)
-- **Data Type Utilities**: Built-in GeoJSON conversion utilities
+- **Data Type Utilities**: GeoJSON converters for the Places responses
 - **MapLibre Integration**: Adapter for MapLibre GL Geocoder and `createTransformRequest` helper
 - **Map Style Control**: Fetch and customize map style descriptors — color scheme, points of interest, label language, and terrain, 3D buildings, traffic and more as [plan features](#plan-features)
 - **Map Language**: Switch map label language client-side with zero API calls
 - **POI Layer Control**: Toggle point-of-interest categories on/off by layer
 - **Server Utilities**: `getClientConfig()` with auto-env detection and token caching
+- **Typed Errors**: every failure is a `LocationServiceException` whose `code` is a `LocationServiceErrorCode`
 
 ## Quick Start
 
@@ -73,7 +74,8 @@ export async function getLocationConfig() {
 Set these environment variables:
 
 ```bash
-LOCATION_API_URL=https://api.chaosity.cloud
+# The API URL on your application's page in the developer portal
+LOCATION_API_URL=https://your-api-url.example
 LOCATION_CLIENT_ID=your-client-id
 LOCATION_CLIENT_SECRET=your-client-secret
 
@@ -86,7 +88,7 @@ Or pass credentials explicitly:
 
 ```typescript
 const config = await getClientConfig({
-  apiUrl: 'https://api.chaosity.cloud',
+  apiUrl: process.env.MY_API_URL!,
   clientId: process.env.MY_CLIENT_ID!,
   clientSecret: process.env.MY_SECRET!,
 })
@@ -102,10 +104,9 @@ import {
   type SuggestCommandOutput,
 } from '@chaosity/location-client'
 
-const client = new GeoPlacesClient({
-  apiUrl: 'https://api.chaosity.cloud',
-  token: 'your-bearer-token',
-})
+// apiUrl and token as getLocationConfig() above returns them
+const { apiUrl, token } = await getLocationConfig()
+const client = new GeoPlacesClient({ apiUrl, token })
 
 const response: SuggestCommandOutput = await client.send(
   new SuggestCommand({
@@ -172,9 +173,9 @@ if (answer.verified) {
   because the service would drop `Language`, `PoliticalView` and
   `AdditionalFeatures`. A repeat verify of the same PlaceId may be answered
   from the service's own store, and is billed all the same.
-- Keep the PlaceId you sent beside the answer. The answer's own `PlaceId` can
-  differ, and for a unit it does. The service does not accept that one back,
-  while the one you sent verifies again.
+- The answer's `PlaceId` is the one you sent, for a unit as for a building,
+  so a stored verification can be verified, or looked up with
+  `GetPlaceCommand`, again by its own `PlaceId`.
 - `client.verifyAddress(placeId)` is
   `client.send(new VerifyAddressCommand({ PlaceId: placeId }))`, typed as
   `VerifyAddressResponse`. `connector.verifyAddress` does the same on the
@@ -399,10 +400,11 @@ const geocoder = new MaplibreGeocoder(geoPlaces, {
 
 map.addControl(geocoder, 'top-left')
 
-// The geocoder calls getSuggestions → searchByPlaceId internally.
-// The 'result' event fires with the resolved place feature.
-geocoder.on('result', (event) => {
-  console.log('Selected place:', event.result)
+// Picking a suggestion calls searchByPlaceId, and the geocoder emits
+// 'results' with the resolved place on `place`. It emits 'result' only when a
+// typed query is geocoded (forwardGeocode) and one of its features is chosen.
+geocoder.on('results', (event) => {
+  if (event.place) console.log('Selected place:', event.place[0])
 })
 ```
 
@@ -417,7 +419,7 @@ Client for executing AWS Location Service commands with Bearer token auth.
 ```typescript
 const client = new GeoPlacesClient({
   apiUrl: string,
-  token: string,
+  token?: string, // at least one of token, getToken and refreshToken
   getToken?: () => string | undefined, // Optional: dynamic token getter
   refreshToken?: () => Promise<string | undefined>, // Optional: 401 self-heal
 })
@@ -452,6 +454,18 @@ request is retried **once** with what it returns. Return the same token, or
 nothing, and no retry is sent — a request that is going to fail again is not
 worth a second round trip. A 403 is never retried: a new token cannot fix an
 `Origin` the application does not allow.
+
+**A refused token is not sent again for 30 seconds.** When the API refuses a
+token and `refreshToken` cannot replace it — it rejects with a 401 or 403, or
+returns the same token — the next sends with that token reject with the same
+refusal without a request, and without asking `refreshToken`. A suspended
+application is refused on every route and by its token route alike, so each
+send used to cost a refused request and a refused refresh. A different token
+from `getToken` ends the wait at once. A `refreshToken` that fails with a
+`Retry-After` is held for that long instead. One that fails with nothing to
+say about when to try again — a network fault, or a Server Action's error,
+which reaches the browser without its fields — is asked again on the next
+send, and the refused token is not sent before it.
 
 #### Request options
 
@@ -501,6 +515,39 @@ produced one yet raises `InvalidCredentialsException` instead of putting
 `Bearer undefined` on the wire — which could only ever come back a 401, a round
 trip spent to be told what you already know. `GeoPlacesClient` asks `refreshToken` first, so a
 client whose token simply has not arrived yet still works.
+
+#### Errors
+
+Every failure is a `LocationServiceException`. Its `code` is typed
+`LocationServiceErrorCode`: every code the API documents at
+[docs.chaosity.cloud/api/errors](https://docs.chaosity.cloud/api/errors), the
+Amazon Location names it passes through, and the four this package raises for
+a failure that never reached the API (`AbortedException`, `NetworkException`,
+`ServiceException`, `UnknownCommandException`). A code the API adds later
+arrives all the same, so treat an unknown one as you would its status.
+
+```typescript
+import {
+  LocationServiceException,
+  type LocationServiceErrorCode,
+} from '@chaosity/location-client'
+
+try {
+  await client.send(command)
+} catch (err) {
+  if (!(err instanceof LocationServiceException)) throw err
+  const code: LocationServiceErrorCode | (string & {}) = err.code
+  if (code === 'RateLimitExceededException') {
+    // this application's own rate: wait `err.retryAfterMs`
+  } else if (code === 'ApplicationNotActiveException') {
+    // new, suspended, or off its plan: see the application in the portal
+  }
+}
+```
+
+`message` is the API's own sentence. On `/auth/token` that is its
+`error_description`, so a suspended application's refusal reads
+`Application is not active`.
 
 #### GeoPlaces Adapter
 
@@ -655,21 +702,45 @@ import { VerifyAddressCommand } from '@chaosity/location-client'
 
 #### Data Type Utilities
 
-GeoJSON conversion utilities from `@aws/amazon-location-utilities-datatypes`:
+GeoJSON converters from `@aws/amazon-location-utilities-datatypes`, one per
+Places response that carries positions. A result with no position becomes no
+feature:
+
+| Converter                                   | Takes the response of                                                                                                    |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `geocodeResponseToFeatureCollection`        | `GeocodeCommand`                                                                                                         |
+| `reverseGeocodeResponseToFeatureCollection` | `ReverseGeocodeCommand`                                                                                                  |
+| `getPlaceResponseToFeatureCollection`       | `GetPlaceCommand`                                                                                                        |
+| `suggestResponseToFeatureCollection`        | `SuggestCommand` with `AdditionalFeatures: ['Core']`. Without it, Suggest results carry no position, and it returns none |
+| `searchTextResponseToFeatureCollection`     | `SearchTextCommand`                                                                                                      |
+| `searchNearbyResponseToFeatureCollection`   | `SearchNearbyCommand`                                                                                                    |
 
 ```typescript
 import {
-  placeToFeatureCollection,
-  routeToFeatureCollection,
-  devicePositionsToFeatureCollection,
+  SearchTextCommand,
+  searchTextResponseToFeatureCollection,
+  type SearchTextCommandOutput,
 } from '@chaosity/location-client'
+
+const response: SearchTextCommandOutput = await client.send(
+  new SearchTextCommand({
+    QueryText: 'coffee',
+    // SearchText takes exactly one of BiasPosition, Filter.BoundingBox or Filter.Circle.
+    BiasPosition: [-123.1207, 49.2827],
+  }),
+)
+const geojson = searchTextResponseToFeatureCollection(response)
 ```
+
+Autocomplete has no converter: its results carry no position. The package
+re-exports the rest of that package's converters too, but they take responses
+from other Amazon Location APIs, which this service does not serve.
 
 ### Server Exports (`@chaosity/location-client/server`)
 
 #### getClientConfig
 
-Gets a client config with a fresh token. Uses a singleton `TokenProvider` internally — safe to call repeatedly (tokens are cached and refreshed automatically).
+Gets a client config with a fresh token. It keeps one `TokenProvider` per application, for the applications used most recently, so it is safe to call repeatedly: tokens are cached and refreshed automatically.
 
 ```typescript
 import { getClientConfig } from '@chaosity/location-client/server'
@@ -681,6 +752,15 @@ const config = await getClientConfig()
 // portal, or issued against a client secret that has since been rotated.
 const replacement = await getClientConfig({ forceRefresh: true })
 ```
+
+A refusal arrives with the API's code and sentence. Where the API refused the
+credentials themselves, the message goes on to say which variables to check,
+and names the client ID. An application that is not active reads
+`Application is not active`, although once the API's authorizer has
+refused it the sentence is the same as for a wrong secret, and the advice then
+says to check both. A refusal is remembered for 30 seconds, and a
+`Retry-After` for as long as it asks: calls in that time reject at once,
+without asking `/auth/token` again.
 
 The return value is **plain data** — no methods, no closures — so it can be
 returned straight out of a Next.js Server Action to a Client Component. It is
@@ -738,8 +818,13 @@ which wins over both). `/auth/token` is the one endpoint exempt.
 
 A connector configured this way keeps working indefinitely: it holds a live
 token source, refreshes before expiry, and retries once with a new token if the
-API rejects the one it sent. Pass an explicit `token` instead and you opt out of
-all of that — it is a fixed string, and it dies at its own `exp`:
+API rejects the one it sent. If the new token is refused too, as a suspended
+application's is, the refusal is remembered for 30 seconds: sends in that time
+reject with it at once, without a data request or a token request. A refresh
+that fails with nothing to say about when to try again, a network fault for
+one, is asked again on the next send, without the refused token first. Pass an
+explicit `token` instead and you opt out of all of that — it is a fixed string,
+and it dies at its own `exp`:
 
 ```typescript
 // Managing credentials yourself: an explicit token source wins outright, and

@@ -1,4 +1,5 @@
 import debug from 'debug'
+import { TokenHold, holdFor } from '../auth/tokenHold.js'
 import type { VerifyAddressResponse } from '../client/commands.js'
 import { VerifyAddressCommand } from '../client/commands.js'
 import { LocationServiceException } from '../errors/LocationServiceException.js'
@@ -175,6 +176,8 @@ export class LocationServiceConnector {
   private readonly config: ConnectorConfig
   private tokenSource?: TokenSource
   private readonly origin?: string
+  /** A token the API refused, and why, until the hold lapses (#38). */
+  private readonly refused = new TokenHold()
   public readonly serviceId: string = 'Geo Places'
 
   constructor(config: ConnectorConfig = {}) {
@@ -310,22 +313,54 @@ export class LocationServiceConnector {
     const token = await source.get()
     if (!token) throw noTokenAvailable(NO_TOKEN_ADVICE)
 
+    // This token was refused a moment ago and nothing has replaced it: answer
+    // with that refusal rather than send it, and force the source, again (#38).
+    // A different token from the source ends the hold. When the refresh that
+    // followed said nothing about when to ask again, it is asked now — but the
+    // refused token is still not sent.
+    const held = this.refused.check(token)
+    if (held && !held.askAgain) throw held.error
+
+    let rejected: unknown = held?.error
+    if (!held) {
+      try {
+        return await this.dispatch<TOutput>(url, token, cmd, options)
+      } catch (err) {
+        if (!isTokenRejected(err)) throw err
+        rejected = err
+      }
+    }
+
+    // One retry, and only when the replacement is genuinely a different token.
+    // That single comparison covers every source: a fixed `token` string, a
+    // caller `getToken` that ignores `forceRefresh`, and a cached token the API
+    // has revoked before its `exp` all hand back what we already sent — and
+    // re-sending it would be a second doomed request for the same answer.
+    let fresh: string | undefined
     try {
-      return await this.dispatch<TOutput>(url, token, cmd, options)
-    } catch (err) {
-      if (!isTokenRejected(err)) throw err
+      fresh = await source.get(true)
+    } catch (refusal) {
+      // A suspended application's /auth/token refuses it as its data routes
+      // refuse its token. Without this, every send asked for another. A
+      // refusal that says nothing — a network fault — leaves the source to be
+      // asked again, but not the token sent.
+      if (holdFor(refusal) > 0) this.refused.remember(refusal, token)
+      // Only when no hold stands: one already standing keeps its own end, so
+      // the refused token is tried again once per hold rather than never.
+      else if (!held) this.refused.remember(rejected, token, { askAgain: true })
+      throw refusal
+    }
+    if (!fresh || fresh === token) {
+      this.refused.remember(rejected, token)
+      throw rejected
+    }
 
-      // One retry, and only when the replacement is genuinely a different
-      // token. That single comparison covers every source: a fixed `token`
-      // string, a caller `getToken` that ignores `forceRefresh`, and a cached
-      // token the API has revoked before its `exp` all hand back what we
-      // already sent — and re-sending it would be a second doomed request for
-      // the same answer.
-      const fresh = await source.get(true)
-      if (!fresh || fresh === token) throw err
-
-      log('401 on a token the API no longer accepts — retrying once, refreshed')
+    log('401 on a token the API no longer accepts — retrying once, refreshed')
+    try {
       return await this.dispatch<TOutput>(url, fresh, cmd, options)
+    } catch (again) {
+      if (isTokenRejected(again)) this.refused.remember(again, fresh)
+      throw again
     }
   }
 

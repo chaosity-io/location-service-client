@@ -155,6 +155,27 @@ function toCarmenFeatures(
   })
 }
 
+/**
+ * The geocoder's `bbox` — `[minX, minY, maxX, maxY]`, the order Amazon's
+ * `BoundingBox` takes too — or undefined when it has none, or not four
+ * numbers.
+ */
+function boundingBox(bbox: number[] | undefined): number[] | undefined {
+  return bbox?.length === 4 && bbox.every((v) => typeof v === 'number')
+    ? bbox
+    : undefined
+}
+
+/**
+ * Whether `[x, y]` lies in `bbox`, edges included. A box whose `minX` is
+ * greater than its `maxX` crosses the antimeridian.
+ */
+function insideBox([x, y]: number[], bbox: number[]): boolean {
+  const [minX, minY, maxX, maxY] = bbox
+  if (y < minY || y > maxY) return false
+  return minX <= maxX ? x >= minX && x <= maxX : x >= minX || x <= maxX
+}
+
 export class GeoPlaces implements MaplibreGeocoderApi {
   private client: GeoPlacesClient
   private map: Map
@@ -225,9 +246,18 @@ export class GeoPlaces implements MaplibreGeocoderApi {
     const converted = geocodeResponseToFeatureCollection(response, {
       flattenProperties: true,
     })
+    // Geocode takes no box, so the geocoder's `bbox` is applied here, to what
+    // comes back (#59). It used to be ignored, and a result picked with Enter
+    // could land outside the box the integrator set.
+    const bbox = boundingBox(config.bbox)
+    const features = bbox
+      ? converted.features.filter((f) =>
+          insideBox(f.geometry.coordinates as number[], bbox),
+        )
+      : converted.features
     const result: MaplibreGeocoderFeatureResults = {
       type: 'FeatureCollection',
-      features: toCarmenFeatures(converted.features),
+      features: toCarmenFeatures(features),
     }
     log('forwardGeocode returned %d results', result.features.length)
     return result
@@ -268,40 +298,48 @@ export class GeoPlaces implements MaplibreGeocoderApi {
   ): Promise<MaplibreGeocoderSuggestionResults> {
     log('getSuggestions query=%s', config.query)
 
+    // Suggest takes exactly ONE of BiasPosition, Filter.BoundingBox and
+    // Filter.Circle, and refuses a request with two: 400 "Exactly one of the
+    // following fields must be set". This sent a bias always, and the box
+    // beside it whenever the geocoder carried one, so a `bbox` made every
+    // suggestion fail (#59). The box, when there is one, is the bias.
+    const bbox = boundingBox(config.bbox)
     const center = this.map.getCenter()
-    const biasPosition =
-      config.proximity && config.proximity.length >= 2
+    const biasPosition = bbox
+      ? undefined
+      : config.proximity && config.proximity.length >= 2
         ? [config.proximity[0], config.proximity[1]]
         : [center.lng, center.lat]
+    const countries = config.countries
+      ? Array.isArray(config.countries)
+        ? config.countries
+        : config.countries.split(',')
+      : undefined
 
     const commandInput = {
       QueryText: config.query as string,
-      BiasPosition: biasPosition,
+      ...(biasPosition ? { BiasPosition: biasPosition } : {}),
       MaxResults: config.limit || 5,
       Language: this.normalizeLanguage(config.language),
       // No AdditionalFeatures (#3 / T19).
       //
       // This used to send `[Core]`, which put every keystroke in the Core
-      // bucket at $0.50/1k. The only thing Core adds to a Suggest response is
-      // `Highlights`, and this adapter reads `Title` and `Place.PlaceId` —
-      // nothing else. Verified against Amazon Location on 2026-08-25:
+      // bucket at $0.50/1k. What Core adds to a Suggest response is
+      // `Highlights` and the place's `Position` (without it,
+      // `suggestResponseToFeatureCollection` finds no feature: measured
+      // 2026-09-29), and this adapter reads neither — only `Title` and
+      // `Place.PlaceId`. Verified against Amazon Location on 2026-08-25:
       //
       //   with [Core] -> bucket Core   keys: Title, ..., Place, Highlights
       //   without     -> bucket Label  keys: Title, ..., Place
       //
       // Same two fields, $0.20/1k instead of $0.50. Suggest fires per
       // keystroke, so it is the highest-volume call the library makes.
-      ...(config.countries || config.bbox
+      ...(bbox || countries
         ? {
             Filter: {
-              ...(config.countries
-                ? {
-                    IncludeCountries: Array.isArray(config.countries)
-                      ? config.countries
-                      : config.countries.split(','),
-                  }
-                : {}),
-              ...(config.bbox ? { BoundingBox: config.bbox } : {}),
+              ...(bbox ? { BoundingBox: bbox } : {}),
+              ...(countries ? { IncludeCountries: countries } : {}),
             },
           }
         : {}),

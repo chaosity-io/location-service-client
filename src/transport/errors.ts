@@ -1,16 +1,25 @@
-import { LocationServiceException } from '../errors/LocationServiceException.js'
+import {
+  LocationServiceException,
+  type LocationServiceErrorCode,
+} from '../errors/LocationServiceException.js'
 
 /**
  * Turn a non-2xx response into a LocationServiceException.
  *
- * The API does not yet speak one error shape — that is api#29 (T23) — so this
- * tolerates the three it currently emits and synthesises a `code` for each.
- * RFC-0002 calls this legacy tolerance, and it is what lets the client ship
- * before the API contract lands. Delete the fallbacks once T23 is deployed.
+ * The API answers every failure with a `code`, in one of three envelopes:
  *
- *   { message, code, requestId }         service Lambdas — already correct
- *   { error, error_description }         /auth/token, OAuth shape
- *   { message: "Unauthorized" }          API Gateway's own responses
+ *   { message, code, requestId }                    data routes; the gateway
+ *   { error, error_description, code, requestId }   /auth/token (OAuth 2.0)
+ *   { code, message }                               the per-address limit
+ *
+ * The sentence is in `message`, or on /auth/token in `error_description`, and
+ * both are read whatever else the body carries (#38). The description used to
+ * be read only from a body with no `code`, and /auth/token has sent one since,
+ * so every refusal from it arrived as "Request failed: Unauthorized": a
+ * suspended application read exactly like a wrong secret.
+ *
+ * A body with no `code` — a proxy's, or an older deployment's — still gets
+ * one: from its OAuth `error`, else from the status.
  */
 export function parseErrorResponse(
   status: number,
@@ -25,16 +34,22 @@ export function parseErrorResponse(
 
   try {
     const data = JSON.parse(body)
+    const text = (value: unknown) =>
+      typeof value === 'string' ? value : undefined
 
-    if (typeof data.message === 'string') message = data.message
-    if (typeof data.code === 'string') code = data.code
-    if (typeof data.requestId === 'string') requestId = data.requestId
+    message =
+      text(data.error_description) ??
+      text(data.message) ??
+      text(data.error) ??
+      message
+    code = text(data.code)
+    requestId = text(data.requestId)
 
-    // OAuth envelope from /auth/token
-    if (!code && typeof data.error === 'string') {
-      message = data.error_description ?? data.error
-      code = oauthCode(data.error, status)
-      details = { oauthError: data.error }
+    // OAuth `error`, from /auth/token and the gateway's 401 on it
+    const oauthError = text(data.error)
+    if (oauthError) {
+      code ??= oauthCode(oauthError, status)
+      details = { oauthError }
     }
   } catch {
     if (body) message = body
@@ -51,7 +66,7 @@ export function parseErrorResponse(
 }
 
 /** OAuth `error` values the token endpoint emits, mapped to our codes. */
-function oauthCode(error: string, status: number): string {
+function oauthCode(error: string, status: number): LocationServiceErrorCode {
   switch (error) {
     case 'temporarily_unavailable':
       return 'ServiceUnavailableException'
@@ -68,7 +83,7 @@ function oauthCode(error: string, status: number): string {
 }
 
 /** Last resort when the body carried no code at all (bare gateway responses). */
-function statusCode(status: number): string {
+function statusCode(status: number): LocationServiceErrorCode {
   switch (status) {
     case 400:
       return 'ValidationException'

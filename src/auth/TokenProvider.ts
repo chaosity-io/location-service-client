@@ -1,6 +1,7 @@
 import debug from 'debug'
 import { LocationServiceException } from '../errors/LocationServiceException.js'
 import { requestJson } from '../transport/http.js'
+import { TokenHold, isTokenRefusal } from './tokenHold.js'
 import {
   TOKEN_REFRESH_BUFFER_SECONDS,
   readTokenExpiry,
@@ -54,6 +55,8 @@ export class TokenProvider {
   private cachedToken?: string
   private cachedExpiresAt?: number
   private tokenPromise?: Promise<TokenResponse>
+  /** A refusal or a Retry-After from `/auth/token`, until it lapses (#38). */
+  private readonly hold = new TokenHold()
 
   constructor(config: TokenProviderConfig) {
     // Runtime check: prevent usage in browser
@@ -80,6 +83,16 @@ export class TokenProvider {
         token: this.cachedToken,
         expiresAt: this.cachedExpiresAt,
       }
+    }
+
+    // The endpoint refused these credentials, or asked us to wait, a moment
+    // ago: answer with that rather than ask again (#38). Forced or not — a
+    // forced refresh asks for a different token, and these credentials will
+    // not get one until the hold lapses.
+    const held = this.hold.check()?.error
+    if (held) {
+      log('Token request held: %s', held.message)
+      throw held
     }
 
     // If token fetch is already in progress, wait for it
@@ -125,24 +138,38 @@ export class TokenProvider {
     const { clientId, clientSecret, apiUrl } = this.config
     const credentials = btoa(`${clientId}:${clientSecret}`)
 
-    const data = await requestJson<{
+    let data: {
       access_token: string
       expires_at?: number
       expires_in?: number
-    }>(
-      `${apiUrl}/auth/token`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Basic ${credentials}`,
-          'Content-Type': 'application/x-www-form-urlencoded',
+    }
+    try {
+      data = await requestJson(
+        `${apiUrl}/auth/token`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Basic ${credentials}`,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: new URLSearchParams({
+            grant_type: 'client_credentials',
+          }).toString(),
         },
-        body: new URLSearchParams({
-          grant_type: 'client_credentials',
-        }).toString(),
-      },
-      { retry: { maxAttempts: 3 } },
-    )
+        { retry: { maxAttempts: 3 } },
+      )
+    } catch (error) {
+      // Remembered, so the next call is answered without a request (#38), and
+      // a Retry-After is honoured across calls rather than only within this
+      // one (#63).
+      this.hold.remember(error)
+      // A refusal is about the credentials, so every token they minted is
+      // refused too — a suspended application's on its next use, a rotated
+      // secret's at once. Never hand the cached one out again. A Retry-After
+      // says nothing about it, and keeps it.
+      if (isTokenRefusal(error)) this.clearCache()
+      throw error
+    }
 
     if (!data.access_token) {
       throw new LocationServiceException({
@@ -152,6 +179,7 @@ export class TokenProvider {
       })
     }
 
+    this.hold.forget()
     this.cachedToken = data.access_token
     // The token's own `exp` claim first — it is the only value that cannot
     // disagree with what the API will actually accept. `expires_at` and
