@@ -72,8 +72,8 @@ describe('every command the root exports resolves to a route', () => {
   // A command added without an ENDPOINTS entry used to compile, export and
   // then throw UnknownCommandException at the first caller. Read from the
   // root, not listed here, so the next one fails in this file instead. The
-  // SDK's `$Command` base class rides in on the `export *`; it is not a
-  // command anyone sends, and the pattern is places-commands.test.ts's.
+  // SDK's `$Command` base class rides in on the generated re-exports; it is
+  // not a command anyone sends, and the pattern is places-commands.test.ts's.
   const commands = Object.entries(Root).filter(
     ([name, value]) =>
       /^[A-Z]\w*Command$/.test(name) && typeof value === 'function',

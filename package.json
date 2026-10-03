@@ -58,8 +58,8 @@
     "url": "https://github.com/chaosity-io/location-service-client/issues"
   },
   "dependencies": {
-    "@aws-sdk/client-geo-places": "^3.0.0",
-    "@aws/amazon-location-utilities-datatypes": "^1.0.0",
+    "@aws-sdk/client-geo-places": "^3.1116.0",
+    "@aws/amazon-location-utilities-datatypes": "^1.2.4",
     "debug": "^4.4.3"
   },
   "peerDependencies": {

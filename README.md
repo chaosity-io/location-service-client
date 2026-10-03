@@ -22,6 +22,9 @@ AWS Location Service compatible client with custom Bearer token authentication.
 npm install @chaosity/location-client
 ```
 
+TypeScript users need TypeScript 5.0 or later: the declarations use
+`export type *`.
+
 The Places commands, the transport and the static-map and style-URL helpers need
 nothing else. The **map** features are optional peer dependencies, so install
 them only if you use them:
@@ -98,17 +101,13 @@ const config = await getClientConfig({
 ### Client-Side: Using the GeoPlacesClient
 
 ```typescript
-import {
-  GeoPlacesClient,
-  SuggestCommand,
-  type SuggestCommandOutput,
-} from '@chaosity/location-client'
+import { GeoPlacesClient, SuggestCommand } from '@chaosity/location-client'
 
 // apiUrl and token as getLocationConfig() above returns them
 const { apiUrl, token } = await getLocationConfig()
 const client = new GeoPlacesClient({ apiUrl, token })
 
-const response: SuggestCommandOutput = await client.send(
+const response = await client.send(
   new SuggestCommand({
     QueryText: 'Vancouver',
     MaxResults: 5,
@@ -116,7 +115,13 @@ const response: SuggestCommandOutput = await client.send(
     BiasPosition: [-123.1207, 49.2827],
   }),
 )
+response.ResultItems
 ```
+
+`send` resolves with the command's own output type — `SuggestCommandOutput`
+here — so there is nothing to annotate, on `GeoPlacesClient` and
+`LocationServiceConnector` alike (since 0.13.0). `CommandOutput<C>` names it
+when you need it.
 
 ### Verifying an address
 
@@ -129,15 +134,10 @@ Japan, which may not be stored at all.
 The flow is suggest, then an optional unit pick, then verify at submit:
 
 ```typescript
-import {
-  GetPlaceCommand,
-  SuggestCommand,
-  type GetPlaceCommandOutput,
-  type SuggestCommandOutput,
-} from '@chaosity/location-client'
+import { GetPlaceCommand, SuggestCommand } from '@chaosity/location-client'
 
 // 1. While the person types: suggestions, for display.
-const suggestions: SuggestCommandOutput = await client.send(
+const suggestions = await client.send(
   // Suggest takes exactly one of BiasPosition, Filter.BoundingBox or Filter.Circle.
   new SuggestCommand({
     QueryText: '100 George St, Sydney',
@@ -147,7 +147,7 @@ const suggestions: SuggestCommandOutput = await client.send(
 const picked = suggestions.ResultItems?.[0]?.Place?.PlaceId
 
 // 2. Optionally, offer the building's units. Each has its own PlaceId.
-const building: GetPlaceCommandOutput = await client.send(
+const building = await client.send(
   new GetPlaceCommand({
     PlaceId: picked!,
     AdditionalFeatures: ['SecondaryAddresses'],
@@ -719,10 +719,9 @@ feature:
 import {
   SearchTextCommand,
   searchTextResponseToFeatureCollection,
-  type SearchTextCommandOutput,
 } from '@chaosity/location-client'
 
-const response: SearchTextCommandOutput = await client.send(
+const response = await client.send(
   new SearchTextCommand({
     QueryText: 'coffee',
     // SearchText takes exactly one of BiasPosition, Filter.BoundingBox or Filter.Circle.
@@ -878,7 +877,9 @@ DEBUG=location-client:api npm run dev
 
 ## TypeScript Support
 
-Full TypeScript support with types from AWS SDK:
+The request and response types are the AWS SDK's, and `send` resolves with the
+command's own output type. To name it — for a variable declared before the
+call, say — use the SDK's `…CommandOutput` or `CommandOutput<C>`:
 
 ```typescript
 import type { SuggestCommandOutput } from '@chaosity/location-client'
