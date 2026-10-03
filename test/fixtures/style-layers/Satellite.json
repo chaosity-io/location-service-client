@@ -1,0 +1,14 @@
+{
+  "style": "Satellite",
+  "capturedOn": "2026-10-03",
+  "layers": [
+    {
+      "id": "land",
+      "type": "background"
+    },
+    {
+      "id": "satellite",
+      "type": "raster"
+    }
+  ]
+}

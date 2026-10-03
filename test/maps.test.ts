@@ -365,7 +365,8 @@ describe('POI visibility', () => {
   it('handles a category backed by more than one layer', () => {
     const { map, set } = fakeMap()
     setPoiVisibility(map, 'parks', false)
-    expect(set).toHaveBeenCalledTimes(2)
+    expect(POI_CATEGORIES.parks.length).toBeGreaterThan(1)
+    expect(set).toHaveBeenCalledTimes(POI_CATEGORIES.parks.length)
   })
 
   it('skips a layer the current style does not have', () => {

@@ -1,10 +1,4 @@
-import {
-  type GeocodeResponse,
-  GetPlaceAdditionalFeature,
-  type GetPlaceResponse,
-  type ReverseGeocodeResponse,
-  type SuggestResponse,
-} from '@aws-sdk/client-geo-places'
+import { GetPlaceAdditionalFeature } from '@aws-sdk/client-geo-places'
 import {
   geocodeResponseToFeatureCollection,
   getPlaceResponseToFeatureCollection,
@@ -177,12 +171,18 @@ function insideBox([x, y]: number[], bbox: number[]): boolean {
 }
 
 export class GeoPlaces implements MaplibreGeocoderApi {
-  private client: GeoPlacesClient
+  private client: Pick<GeoPlacesClient, 'send'>
   private map: Map
   private details: GeoPlacesDetailOptions
 
+  /**
+   * @param client Anything with the client's `send` — the adapter calls
+   *   nothing else (#65). `@chaosity/location-client-react`'s
+   *   `useLocationClient()` hands out an interface, not a `GeoPlacesClient`,
+   *   and a class with private fields admits no other object.
+   */
   constructor(
-    client: GeoPlacesClient,
+    client: Pick<GeoPlacesClient, 'send'>,
     map: Map,
     options: GeoPlacesOptions = {},
   ) {
@@ -240,9 +240,7 @@ export class GeoPlaces implements MaplibreGeocoderApi {
       }
     }
 
-    const response = (await this.client.send(
-      new GeocodeCommand(commandInput),
-    )) as GeocodeResponse
+    const response = await this.client.send(new GeocodeCommand(commandInput))
     const converted = geocodeResponseToFeatureCollection(response, {
       flattenProperties: true,
     })
@@ -279,9 +277,9 @@ export class GeoPlaces implements MaplibreGeocoderApi {
       Language: this.normalizeLanguage(config.language),
     }
 
-    const response = (await this.client.send(
+    const response = await this.client.send(
       new ReverseGeocodeCommand(commandInput),
-    )) as ReverseGeocodeResponse
+    )
     const converted = reverseGeocodeResponseToFeatureCollection(response, {
       flattenProperties: true,
     })
@@ -345,9 +343,7 @@ export class GeoPlaces implements MaplibreGeocoderApi {
         : {}),
     }
 
-    const response = (await this.client.send(
-      new SuggestCommand(commandInput),
-    )) as SuggestResponse
+    const response = await this.client.send(new SuggestCommand(commandInput))
     const suggestions: MaplibreGeocoderSuggestionResults = { suggestions: [] }
 
     for (const item of response.ResultItems ?? []) {
@@ -379,7 +375,7 @@ export class GeoPlaces implements MaplibreGeocoderApi {
       ...(additionalFeatures ? { AdditionalFeatures: additionalFeatures } : {}),
     })
 
-    const response = (await this.client.send(command)) as GetPlaceResponse
+    const response = await this.client.send(command)
     const result = getPlaceResponseToFeatureCollection(response, {
       flattenProperties: true,
     })

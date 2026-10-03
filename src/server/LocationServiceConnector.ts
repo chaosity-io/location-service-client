@@ -7,7 +7,11 @@ import { resolveEndpoint } from '../transport/endpoints.js'
 import { isTokenRejected, noTokenAvailable } from '../transport/errors.js'
 import type { RequestOptions } from '../transport/http.js'
 import { requestJson } from '../transport/http.js'
-import type { GeoPlacesCommand } from '../types/index.js'
+import type {
+  CommandOutput,
+  CommandWithOutput,
+  GeoPlacesCommand,
+} from '../types/index.js'
 import type { AppConfigClaims } from '../utils/tokenClaims.js'
 import { readAppConfigClaims } from '../utils/tokenClaims.js'
 import { resolveApiUrl, serverTokenSource } from './getClientConfig.js'
@@ -274,16 +278,30 @@ export class LocationServiceConnector {
     return headerValue(options?.headers, 'origin') || this.origin
   }
 
-  async send<TInput, TOutput>(
+  /**
+   * Send a command, and resolve with its output:
+   * `await connector.send(new SearchTextCommand(…))` is a
+   * `SearchTextCommandOutput`, with nothing to annotate (#68).
+   */
+  send<C extends CommandWithOutput>(
+    command: C,
+    options?: SendOptions,
+  ): Promise<CommandOutput<C>>
+  /**
+   * The signature `send` had before it inferred its output (#68), kept for
+   * calls naming both type arguments, as `GeoPlacesClient.send` keeps it.
+   */
+  send<TInput, TOutput>(
     command: TInput,
     options?: SendOptions,
-  ): Promise<TOutput> {
+  ): Promise<TOutput>
+  async send(command: unknown, options?: SendOptions): Promise<unknown> {
     const source = this.source()
-    const cmd = command as unknown as GeoPlacesCommand
+    const cmd = command as GeoPlacesCommand
     const url = `${source.apiUrl()}${resolveEndpoint(cmd)}`
 
     try {
-      return await this.dispatchWithRetry<TOutput>(source, url, cmd, options)
+      return await this.dispatchWithRetry(source, url, cmd, options)
     } catch (err) {
       throw explainMissingOrigin(err, this.effectiveOrigin(options))
     }
@@ -304,12 +322,12 @@ export class LocationServiceConnector {
     return this.send(new VerifyAddressCommand({ PlaceId: placeId }), options)
   }
 
-  private async dispatchWithRetry<TOutput>(
+  private async dispatchWithRetry(
     source: TokenSource,
     url: string,
     cmd: GeoPlacesCommand,
     options?: SendOptions,
-  ): Promise<TOutput> {
+  ): Promise<unknown> {
     const token = await source.get()
     if (!token) throw noTokenAvailable(NO_TOKEN_ADVICE)
 
@@ -324,7 +342,7 @@ export class LocationServiceConnector {
     let rejected: unknown = held?.error
     if (!held) {
       try {
-        return await this.dispatch<TOutput>(url, token, cmd, options)
+        return await this.dispatch(url, token, cmd, options)
       } catch (err) {
         if (!isTokenRejected(err)) throw err
         rejected = err
@@ -357,19 +375,19 @@ export class LocationServiceConnector {
 
     log('401 on a token the API no longer accepts — retrying once, refreshed')
     try {
-      return await this.dispatch<TOutput>(url, fresh, cmd, options)
+      return await this.dispatch(url, fresh, cmd, options)
     } catch (again) {
       if (isTokenRejected(again)) this.refused.remember(again, fresh)
       throw again
     }
   }
 
-  private dispatch<TOutput>(
+  private dispatch(
     url: string,
     token: string,
     cmd: GeoPlacesCommand,
     options?: SendOptions,
-  ): Promise<TOutput> {
+  ): Promise<unknown> {
     // The caller's input goes out as the caller wrote it — nothing in the body
     // is derived from the token any more. `BiasPosition` used to be rounded
     // here to a grid sized by a token claim, so nearby callers shared a server
@@ -402,7 +420,7 @@ export class LocationServiceConnector {
     }
 
     log('Sending %s request to %s', cmd.constructor?.name, url)
-    return requestJson<TOutput>(
+    return requestJson<unknown>(
       url,
       { method: 'POST', headers, body: JSON.stringify(cmd.input) },
       options,

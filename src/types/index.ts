@@ -1,5 +1,10 @@
 // Custom types not provided by AWS SDK
 
+import type {
+  VerifyAddressCommand,
+  VerifyAddressResponse,
+} from '../client/commands.js'
+
 /**
  * At least one of `token`, `getToken` or `refreshToken` must supply a token, or
  * `send` refuses locally with `InvalidCredentialsException` rather than putting
@@ -55,6 +60,34 @@ export interface ClientConfig {
 export interface GeoPlacesCommand {
   readonly input: object
 }
+
+/**
+ * The part of an AWS SDK command that carries its output type: the request
+ * handler its `resolveMiddleware` builds resolves with `{ output }`. The SDK's
+ * own `send` reads the output from the command the same way.
+ */
+interface SdkCommandOutputs<O extends object = object> {
+  resolveMiddleware(
+    ...args: never[]
+  ): (...args: never[]) => Promise<{ output: O }>
+}
+
+/**
+ * A command whose output `send` can name (#68): every SDK command, this
+ * package's narrowed Places commands among them, and `VerifyAddressCommand`.
+ */
+export type CommandWithOutput = SdkCommandOutputs | VerifyAddressCommand
+
+/**
+ * What `send` resolves with for a command (#68): an SDK command's own
+ * `…CommandOutput`, and `VerifyAddressResponse` for `VerifyAddressCommand`,
+ * which is this package's and has no handler.
+ *
+ * @example
+ * type Out = CommandOutput<AutocompleteCommand> // AutocompleteCommandOutput
+ */
+export type CommandOutput<C extends CommandWithOutput> =
+  C extends SdkCommandOutputs<infer O> ? O : VerifyAddressResponse
 
 /**
  * Minimal interface for a MapLibre Map instance.

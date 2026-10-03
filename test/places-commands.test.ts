@@ -113,8 +113,8 @@ describe('nothing in src/ builds or re-exports a Places command from the SDK', (
   // point.
   const ALLOWED: Record<string, string> = {
     'src/client/commands.ts': 'the narrowing itself',
-    'src/index.ts':
-      'the root `export *`: its seven Places commands are shadowed by the named exports beside it, which the identity test above proves',
+    'src/aws.ts':
+      'the generated re-exports name `$Command`, Smithy’s base class, which builds no request; the seven Places commands are left out of them, and the identity test above proves the root’s are this package’s',
     'src/transport/endpoints.ts':
       'the instanceof base: an SDK class matches its subclasses too',
   }

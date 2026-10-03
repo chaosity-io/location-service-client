@@ -193,18 +193,20 @@ fix the doc.
 - **The seven Places commands are this package's own, not the SDK's.** The
   service strips `IntendedUse` and `Key` from every request, so
   `src/client/commands.ts` subclasses each SDK command with a constructor that
-  takes the input without them, and the root exports those by name over the
-  `export *` (#40). Narrowing only the `…CommandInput` types would change
-  nothing a caller writes: the SDK's constructor references its own type.
+  takes the input without them, and the root exports those by name; the
+  generated `src/aws.ts` leaves them out (#40). Narrowing only the
+  `…CommandInput` types would change nothing a caller writes: the SDK's
+  constructor references its own type.
   They are subclasses of the SDK's, so `resolveEndpoint`'s `instanceof` matches,
   and nothing is removed at runtime. `test/places-commands.test.ts` reads the
   command list from the SDK itself and compiles against each one
   (`test/typecheck.ts`), so a command the SDK adds fails there until it joins
   the file. The same test parses every file in `src/` and fails a value import
   or re-export of an SDK `…Command` anywhere but `commands.ts`,
-  `transport/endpoints.ts` (the `instanceof` base) and the root's shadowed
-  `export *`: use the narrowed classes. Narrowing is a type change a caller
-  can fail to compile against, so it ships in a MINOR.
+  `transport/endpoints.ts` (the `instanceof` base) and the generated
+  `src/aws.ts`, where only `$Command` matches: use the narrowed classes.
+  Narrowing is a type change a caller can fail to compile against, so it ships
+  in a MINOR.
 - **`VerifyAddressCommand` is the one command with no SDK class** (#54):
   `POST /address/verify` has no AWS command. It is registered in `ENDPOINTS`
   like the others, and it extends nothing on purpose. `resolveEndpoint`
@@ -214,9 +216,40 @@ fix the doc.
   first, so both transports, the 401 self-heal and the body guard cover it
   with no second path. `test/verify-address.test.ts` fails any `…Command`
   the root exports that does not resolve to a route.
-- The root re-exports both AWS barrels with `export *`, which no bundler can
-  tree-shake: a consumer importing only a map helper still pays ~93 KB. Tracked
-  in **#42** — prefer fixing it over adding another `export *`.
+- **The root forwards the two AWS packages by name, never by `export *`, and
+  through a module of its own (#42).** A consumer importing only a map helper
+  paid ~93 KB, for two reasons. No bundler can drop what an `export *` of a
+  package might bind. And `@aws/amazon-location-utilities-datatypes` does not
+  declare `sideEffects: false`, so a re-export of it keeps it in every bundle
+  that reaches the re-export. So `src/aws.ts` holds the packages' types as
+  `export type *`, which is erased, and their values by name; the root reaches
+  it with a local `export *`, and because THIS package declares
+  `sideEffects: false`, a bundler drops the whole module, imports and all,
+  when nothing in it is used. `src/aws.ts` is generated from the packages'
+  declarations by `node scripts/sdk-exports.mjs --write`, and
+  `test/sdk-exports.test.ts` fails when it and the installed packages
+  disagree, when an entry point re-exports a package's values itself, or when
+  `sideEffects: false` goes. The file records the versions it was generated
+  from, and each dependency's floor must be at least that version: in ESM a
+  named re-export of a binding the installed package lacks is a link error,
+  and the whole package fails to import. Dropping a value is a breaking change
+  on 0.x.
+- **`send` names its output from the command (#68).** `send<C>(command: C)`
+  resolves with `CommandOutput<C>`: an SDK command's `…CommandOutput`, read
+  from the handler its `resolveMiddleware` builds as the SDK's own `send` reads
+  it, or `VerifyAddressResponse`. The old `send<TInput, TOutput>` stays as the
+  second overload on both clients, and it is load-bearing: callers pass both
+  type arguments, and `@chaosity/address-form` types its client by a
+  structural `send<TInput, TOutput>` that a client without that overload no
+  longer satisfies. `test/send-output.test.ts` walks the public surface for
+  any other signature whose type parameter no parameter mentions — which
+  TypeScript cannot infer, so it answers `unknown`.
+- **`POI_CATEGORIES` is held to the styles the service serves (#33).** AWS
+  publishes no list of a style's layer ids. `test/fixtures/style-layers/` holds
+  each style's layer ids and types as `scripts/capture-style-layers.mjs`
+  captured them (no host, token or URL), and `test/map-poi-layers.test.ts`
+  requires every `poi*` layer in exactly one category. Re-capture when the
+  styles change.
 - `maplibre-gl` and `@maplibre/maplibre-gl-geocoder` are **optional peer
   dependencies**, and both are imported with `import type` only. Map helpers must
   not make them a hard requirement for consumers who only use the Places

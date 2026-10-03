@@ -26,12 +26,17 @@ export type {
   LocationServiceExceptionOptions,
 } from './errors/LocationServiceException.js'
 
-// Re-export AWS SDK commands and types
-export * from '@aws-sdk/client-geo-places'
+// The AWS SDK's commands and types, and AWS Location Utilities' converters
+// (#42): generated into ./aws.ts, values by name and types by `export type *`.
+// Not `export *` of the packages themselves, which kept ~93 KB of SDK in the
+// bundle of a consumer importing only a map helper — scripts/sdk-exports.mjs
+// says why. A name this file exports itself is left out of ./aws.ts.
+export * from './aws.js'
 
-// …except the seven Places commands and their inputs, which take neither
-// IntendedUse nor Key: the service strips both from every request (#40). A
-// named export wins over the `export *` above, as GeoPlacesClient's does.
+// The seven Places commands and their inputs are this package's own: they take
+// neither IntendedUse nor Key, which the service strips from every request
+// (#40). A named export wins over `export *`, as GeoPlacesClient's does, and
+// ./aws.ts leaves them out.
 // VerifyAddressCommand is this package's own: its route has no SDK command (#54).
 export {
   AutocompleteCommand,
@@ -62,9 +67,6 @@ export type {
   VerifyAddressCommandInput,
   VerifyAddressResponse,
 } from './client/commands.js'
-
-// Re-export AWS Location Utilities (data type conversions)
-export * from '@aws/amazon-location-utilities-datatypes'
 
 // Adapters (Custom - for MapLibre integration)
 export { GeoPlaces } from './adapters/GeoPlaces.js'
@@ -128,7 +130,13 @@ export type {
 export { transformRequest } from './maps/Utils.js'
 
 // Custom Types
-export type { ClientConfig, GeoPlacesCommand, MapLike } from './types/index.js'
+export type {
+  ClientConfig,
+  CommandOutput,
+  CommandWithOutput,
+  GeoPlacesCommand,
+  MapLike,
+} from './types/index.js'
 export type { AppConfigClaims } from './utils/tokenClaims.js'
 
 // Server-only utilities are available via '@chaosity/location-client/server'

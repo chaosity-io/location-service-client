@@ -4,7 +4,12 @@ import { resolveEndpoint } from '../transport/endpoints.js'
 import { isTokenRejected, noTokenAvailable } from '../transport/errors.js'
 import type { RequestOptions } from '../transport/http.js'
 import { requestJson } from '../transport/http.js'
-import type { ClientConfig, GeoPlacesCommand } from '../types/index.js'
+import type {
+  ClientConfig,
+  CommandOutput,
+  CommandWithOutput,
+  GeoPlacesCommand,
+} from '../types/index.js'
 import type { AppConfigClaims } from '../utils/tokenClaims.js'
 import { readAppConfigClaims } from '../utils/tokenClaims.js'
 import type { VerifyAddressResponse } from './commands.js'
@@ -102,15 +107,30 @@ export class GeoPlacesClient {
   }
 
   /**
+   * Send a command, and resolve with its output:
+   * `await client.send(new AutocompleteCommand(…))` is an
+   * `AutocompleteCommandOutput`, with nothing to annotate (#68).
+   *
    * @param options `signal` to cancel, `timeoutMs` per attempt,
    *   `overallTimeoutMs` for the whole call, `retry: false` to disable the
    *   retry loop. Every failure throws LocationServiceException.
    */
-  async send<TInput, TOutput>(
+  send<C extends CommandWithOutput>(
+    command: C,
+    options?: SendOptions,
+  ): Promise<CommandOutput<C>>
+  /**
+   * The signature `send` had before it inferred its output (#68). It stays
+   * so that a call naming both type arguments, and a client typed by a
+   * structural `send<TInput, TOutput>` — as `@chaosity/address-form` types
+   * its client — still compile.
+   */
+  send<TInput, TOutput>(
     command: TInput,
     options?: SendOptions,
-  ): Promise<TOutput> {
-    const cmd = command as unknown as GeoPlacesCommand
+  ): Promise<TOutput>
+  async send(command: unknown, options?: SendOptions): Promise<unknown> {
+    const cmd = command as GeoPlacesCommand
     const url = `${this.clientConfig.apiUrl}${resolveEndpoint(cmd)}`
 
     // The fifth and last place in this package that turns a token into an
@@ -133,7 +153,7 @@ export class GeoPlacesClient {
     let rejected: unknown = held?.error
     if (!held) {
       try {
-        return await this.dispatch<TOutput>(url, token, cmd, options)
+        return await this.dispatch(url, token, cmd, options)
       } catch (err) {
         if (!isTokenRejected(err)) throw err
         rejected = err
@@ -168,7 +188,7 @@ export class GeoPlacesClient {
 
     log('401 — retrying %s once with a refreshed token', cmd.constructor?.name)
     try {
-      return await this.dispatch<TOutput>(url, fresh, cmd, options)
+      return await this.dispatch(url, fresh, cmd, options)
     } catch (again) {
       if (isTokenRejected(again)) this.refused.remember(again, fresh)
       throw again
@@ -190,12 +210,12 @@ export class GeoPlacesClient {
     return this.send(new VerifyAddressCommand({ PlaceId: placeId }), options)
   }
 
-  private dispatch<TOutput>(
+  private dispatch(
     url: string,
     token: string,
     cmd: GeoPlacesCommand,
     options?: SendOptions,
-  ): Promise<TOutput> {
+  ): Promise<unknown> {
     // The caller's input goes out as the caller wrote it. `BiasPosition` used
     // to be rounded here to a grid sized by a token claim, so nearby callers
     // shared a server cache entry; with no cache the rounding only lowered the
@@ -203,7 +223,7 @@ export class GeoPlacesClient {
     // results rather than coarsening them (#51).
 
     log('Sending %s to %s', cmd.constructor?.name, url)
-    return requestJson<TOutput>(
+    return requestJson<unknown>(
       url,
       {
         method: 'POST',

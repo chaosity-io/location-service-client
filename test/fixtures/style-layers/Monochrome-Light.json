@@ -1,0 +1,403 @@
+{
+  "style": "Monochrome",
+  "colorScheme": "Light",
+  "capturedOn": "2026-10-03",
+  "layers": [
+    {
+      "id": "land",
+      "type": "background"
+    },
+    {
+      "id": "rail_tunnel",
+      "type": "line"
+    },
+    {
+      "id": "rail_tie_tunnel",
+      "type": "line"
+    },
+    {
+      "id": "landuse_desert",
+      "type": "fill"
+    },
+    {
+      "id": "landuse_glacier",
+      "type": "fill"
+    },
+    {
+      "id": "landuse_greenspace",
+      "type": "fill"
+    },
+    {
+      "id": "landuse_beach",
+      "type": "fill"
+    },
+    {
+      "id": "admin_region",
+      "type": "line"
+    },
+    {
+      "id": "water_waterway",
+      "type": "line"
+    },
+    {
+      "id": "water_fill",
+      "type": "fill"
+    },
+    {
+      "id": "admin_country",
+      "type": "line"
+    },
+    {
+      "id": "water_ocean",
+      "type": "fill"
+    },
+    {
+      "id": "admin_region-disputed-mask",
+      "type": "line"
+    },
+    {
+      "id": "admin_region-disputed",
+      "type": "line"
+    },
+    {
+      "id": "admin_country-disputed-mask",
+      "type": "line"
+    },
+    {
+      "id": "admin_country-disputed",
+      "type": "line"
+    },
+    {
+      "id": "water_pier-line",
+      "type": "line"
+    },
+    {
+      "id": "water_pier-polygon",
+      "type": "fill"
+    },
+    {
+      "id": "building_fill",
+      "type": "fill"
+    },
+    {
+      "id": "tunnel_service-casing",
+      "type": "line"
+    },
+    {
+      "id": "tunnel_minor-casing",
+      "type": "line"
+    },
+    {
+      "id": "tunnel_tertiary-link-casing",
+      "type": "line"
+    },
+    {
+      "id": "tunnel_primary-link-casing",
+      "type": "line"
+    },
+    {
+      "id": "tunnel_motorway-trunk-link-casing",
+      "type": "line"
+    },
+    {
+      "id": "tunnel_tertiary-casing",
+      "type": "line"
+    },
+    {
+      "id": "tunnel_primary-casing",
+      "type": "line"
+    },
+    {
+      "id": "tunnel_motorway-trunk-casing",
+      "type": "line"
+    },
+    {
+      "id": "road_service-casing",
+      "type": "line"
+    },
+    {
+      "id": "road_minor-casing",
+      "type": "line"
+    },
+    {
+      "id": "road_tertiary-link-casing",
+      "type": "line"
+    },
+    {
+      "id": "road_primary-link-casing",
+      "type": "line"
+    },
+    {
+      "id": "road_motorway-trunk-link-casing",
+      "type": "line"
+    },
+    {
+      "id": "road_tertiary-casing",
+      "type": "line"
+    },
+    {
+      "id": "road_primary-casing",
+      "type": "line"
+    },
+    {
+      "id": "road_motorway-trunk-casing",
+      "type": "line"
+    },
+    {
+      "id": "tunnel_service",
+      "type": "line"
+    },
+    {
+      "id": "tunnel_minor",
+      "type": "line"
+    },
+    {
+      "id": "tunnel_tertiary-link",
+      "type": "line"
+    },
+    {
+      "id": "tunnel_primary-link",
+      "type": "line"
+    },
+    {
+      "id": "tunnel_motorway-trunk-link",
+      "type": "line"
+    },
+    {
+      "id": "tunnel_tertiary",
+      "type": "line"
+    },
+    {
+      "id": "tunnel_primary",
+      "type": "line"
+    },
+    {
+      "id": "tunnel_motorway-trunk",
+      "type": "line"
+    },
+    {
+      "id": "landuse_runway",
+      "type": "fill"
+    },
+    {
+      "id": "airport_runway-casing",
+      "type": "line"
+    },
+    {
+      "id": "airport_runway",
+      "type": "line"
+    },
+    {
+      "id": "building_fill-above-tunnel",
+      "type": "fill"
+    },
+    {
+      "id": "building_line",
+      "type": "line"
+    },
+    {
+      "id": "road_service",
+      "type": "line"
+    },
+    {
+      "id": "road_minor",
+      "type": "line"
+    },
+    {
+      "id": "road_tertiary-link",
+      "type": "line"
+    },
+    {
+      "id": "road_primary-link",
+      "type": "line"
+    },
+    {
+      "id": "road_motorway-trunk-link",
+      "type": "line"
+    },
+    {
+      "id": "road_tertiary",
+      "type": "line"
+    },
+    {
+      "id": "road_primary",
+      "type": "line"
+    },
+    {
+      "id": "road_motorway-trunk",
+      "type": "line"
+    },
+    {
+      "id": "rail_road",
+      "type": "line"
+    },
+    {
+      "id": "rail_tie",
+      "type": "line"
+    },
+    {
+      "id": "bridge_service-shadow",
+      "type": "line"
+    },
+    {
+      "id": "bridge_minor-shadow",
+      "type": "line"
+    },
+    {
+      "id": "bridge_tertiary-link-shadow",
+      "type": "line"
+    },
+    {
+      "id": "bridge_motorway-trunk-link-shadow",
+      "type": "line"
+    },
+    {
+      "id": "bridge_tertiary-shadow",
+      "type": "line"
+    },
+    {
+      "id": "bridge_motorway-trunk-shadow",
+      "type": "line"
+    },
+    {
+      "id": "bridge_service-casing",
+      "type": "line"
+    },
+    {
+      "id": "bridge_minor-casing",
+      "type": "line"
+    },
+    {
+      "id": "bridge_tertiary-link-casing",
+      "type": "line"
+    },
+    {
+      "id": "bridge_primary-link-casing",
+      "type": "line"
+    },
+    {
+      "id": "bridge_motorway-trunk-link-casing",
+      "type": "line"
+    },
+    {
+      "id": "bridge_tertiary-casing",
+      "type": "line"
+    },
+    {
+      "id": "bridge_primary-casing",
+      "type": "line"
+    },
+    {
+      "id": "bridge_motorway-trunk-casing",
+      "type": "line"
+    },
+    {
+      "id": "bridge_service",
+      "type": "line"
+    },
+    {
+      "id": "bridge_minor",
+      "type": "line"
+    },
+    {
+      "id": "bridge_tertiary-link",
+      "type": "line"
+    },
+    {
+      "id": "bridge_primary-link",
+      "type": "line"
+    },
+    {
+      "id": "bridge_motorway-trunk-link",
+      "type": "line"
+    },
+    {
+      "id": "bridge_tertiary",
+      "type": "line"
+    },
+    {
+      "id": "bridge_primary",
+      "type": "line"
+    },
+    {
+      "id": "bridge_motorway-trunk",
+      "type": "line"
+    },
+    {
+      "id": "rail_bridge",
+      "type": "line"
+    },
+    {
+      "id": "rail_tie_bridge",
+      "type": "line"
+    },
+    {
+      "id": "water_label-point",
+      "type": "symbol"
+    },
+    {
+      "id": "water_label-line",
+      "type": "symbol"
+    },
+    {
+      "id": "building_label_number",
+      "type": "symbol"
+    },
+    {
+      "id": "road_label_service",
+      "type": "symbol"
+    },
+    {
+      "id": "road_label_small",
+      "type": "symbol"
+    },
+    {
+      "id": "road_label_medium",
+      "type": "symbol"
+    },
+    {
+      "id": "road_label_large",
+      "type": "symbol"
+    },
+    {
+      "id": "poi_landuse_park_lowzoom",
+      "type": "symbol"
+    },
+    {
+      "id": "poi_landuse_park",
+      "type": "symbol"
+    },
+    {
+      "id": "poi_landuse_public_complex",
+      "type": "symbol"
+    },
+    {
+      "id": "admin_label_region",
+      "type": "symbol"
+    },
+    {
+      "id": "place_label_locality_settlement_small",
+      "type": "symbol"
+    },
+    {
+      "id": "airport_label",
+      "type": "symbol"
+    },
+    {
+      "id": "place_label_locality_settlement",
+      "type": "symbol"
+    },
+    {
+      "id": "place_label_locality_city",
+      "type": "symbol"
+    },
+    {
+      "id": "admin_label_country",
+      "type": "symbol"
+    },
+    {
+      "id": "admin_label_continent",
+      "type": "symbol"
+    }
+  ]
+}

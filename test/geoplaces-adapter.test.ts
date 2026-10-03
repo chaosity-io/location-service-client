@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { GeoPlaces } from '../src/adapters/GeoPlaces'
 import type { GeoPlacesClient } from '../src/client/GeoPlacesClient'
 
+/** What GeoPlaces takes: anything with the client's `send` (#65). */
+type SendOnly = Pick<GeoPlacesClient, 'send'>
+
 /**
  * What the geocoder adapter asks Amazon Location for, and what that costs
  * (#3 / T19, finding A-9).
@@ -27,7 +30,7 @@ const fakeClient = {
     })
     return { ResultItems: [], Title: '', Address: {}, Position: [0, 0] }
   },
-} as unknown as GeoPlacesClient
+} as unknown as SendOnly
 
 const fakeMap = { getCenter: () => ({ lng: 151.209, lat: -33.869 }) }
 
@@ -153,7 +156,7 @@ describe('results carry what the geocoder control renders', () => {
   })
 
   const clientReturning = (response: unknown) =>
-    ({ send: async () => response }) as unknown as GeoPlacesClient
+    ({ send: async () => response }) as unknown as SendOnly
 
   it('forward geocode: place_name, text, place_type, center and bbox are present', async () => {
     const gp = new GeoPlaces(
@@ -296,7 +299,7 @@ describe('a geocoder bbox', () => {
       Position,
     })
     const clientReturning = (ResultItems: unknown[]) =>
-      ({ send: async () => ({ ResultItems }) }) as unknown as GeoPlacesClient
+      ({ send: async () => ({ ResultItems }) }) as unknown as SendOnly
 
     it('drops results outside the bbox', async () => {
       const gp = new GeoPlaces(

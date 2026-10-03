@@ -2,20 +2,29 @@ import type { Map } from 'maplibre-gl'
 
 /**
  * Mapping of POI category names to their MapLibre layer IDs in AWS GeoMaps tiles.
- * Layer IDs are stable across Standard, Monochrome, and Hybrid map styles.
+ *
+ * Standard and Hybrid carry the same sixteen `poi*` layers; Monochrome carries
+ * only the three park layers, and Satellite none. A category whose layers a
+ * style does not carry is skipped. AWS publishes no list of these ids, so
+ * `test/map-poi-layers.test.ts` holds this map to each style's layers as the
+ * service served them: every `poi*` layer in exactly one category (#33).
  */
 export const POI_CATEGORIES = {
   food_drink: ['poi_100_food_drink'],
   entertainment: ['poi_200_going_out_entertainment'],
   sights: ['poi_300_sights_museums'],
-  transit: ['poi_400_transit'],
+  transit: ['poi_400_transit', 'poi_400_transit_small'],
   accommodations: ['poi_500_accommodations'],
   leisure: ['poi_550_leisure_outdoor'],
   shopping: ['poi_600_shopping'],
-  business: ['poi_700_business_services'],
-  facilities: ['poi_800_facilities'],
+  business: ['poi_700_business_services', 'poi_700_business_services_generic'],
+  facilities: ['poi_800_facilities', 'poi_800_facilities_generic'],
   areas: ['poi_900_areas_buildings'],
-  parks: ['poi_landuse_park', 'poi_landuse_public_complex'],
+  parks: [
+    'poi_landuse_park',
+    'poi_landuse_park_lowzoom',
+    'poi_landuse_public_complex',
+  ],
 } as const
 
 export type PoiCategory = keyof typeof POI_CATEGORIES
