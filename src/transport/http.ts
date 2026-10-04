@@ -50,6 +50,60 @@ export interface RequestOptions {
 }
 
 /**
+ * A call's options once it has begun: `deadline` is when `overallTimeoutMs`
+ * runs out, fixed at the call's entry, so that a wait before the request — a
+ * token — spends the same budget the request then gets the rest of (#62).
+ */
+export interface CallOptions extends RequestOptions {
+  deadline: number
+}
+
+/** Fix a call's deadline at its entry (#62). */
+export function startCall<T extends RequestOptions>(
+  options: T = {} as T,
+): T & CallOptions {
+  return {
+    ...options,
+    deadline:
+      Date.now() + (options.overallTimeoutMs ?? DEFAULT_OVERALL_TIMEOUT_MS),
+  }
+}
+
+/**
+ * Wait for `work` within the call: reject with `AbortedException` when the
+ * caller's signal aborts, and with `TimeoutException` when its deadline
+ * passes, whichever comes first (#62). `work` itself is left running, because
+ * it may be shared: one caller's abort must not fail another waiting on the
+ * same token fetch.
+ */
+export function withinCall<T>(work: Promise<T>, call: CallOptions): Promise<T> {
+  const { signal, deadline } = call
+  const overallTimeoutMs = call.overallTimeoutMs ?? DEFAULT_OVERALL_TIMEOUT_MS
+  if (signal?.aborted) return Promise.reject(abortedException(signal))
+  const left = deadline - Date.now()
+  if (left <= 0)
+    return Promise.reject(overallTimeoutException(overallTimeoutMs))
+
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => finish(() => reject(overallTimeoutException(overallTimeoutMs))),
+      left,
+    )
+    const onAbort = () => finish(() => reject(abortedException(signal)))
+    signal?.addEventListener('abort', onAbort, { once: true })
+    function finish(settle: () => void) {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
+      settle()
+    }
+    work.then(
+      (value) => finish(() => resolve(value)),
+      (error: unknown) => finish(() => reject(error)),
+    )
+  })
+}
+
+/**
  * Combine the caller's signal with a per-attempt timeout.
  *
  * `AbortSignal.any` is the clean way and exists in Node 20+ and current
@@ -127,7 +181,7 @@ type ReadBody<T> = (response: Response) => Promise<T>
 async function request<T>(
   url: string,
   init: RequestInit,
-  options: RequestOptions,
+  options: RequestOptions & { deadline?: number },
   read: ReadBody<T>,
 ): Promise<T> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
@@ -150,7 +204,9 @@ async function request<T>(
     })
   }
 
-  const deadline = Date.now() + overallTimeoutMs
+  // A call that began before this request (#62) brings its own deadline, so
+  // the request has only what the wait before it left.
+  const deadline = options.deadline ?? Date.now() + overallTimeoutMs
   let lastError: LocationServiceException | undefined
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {

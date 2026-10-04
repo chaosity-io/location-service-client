@@ -1,8 +1,7 @@
 import type { StyleSpecification } from 'maplibre-gl'
 
-import { noTokenAvailable } from '../transport/errors.js'
 import type { RequestOptions } from '../transport/http.js'
-import { requestJson } from '../transport/http.js'
+import { requestJson, startCall } from '../transport/http.js'
 import type {
   Buildings,
   ColorScheme,
@@ -15,6 +14,8 @@ import type {
   TravelMode,
 } from './mapEnums.js'
 import { labelsByName, languageExpression } from './mapLanguage.js'
+import type { MapTokenSource } from './mapToken.js'
+import { sendWithTokenRefresh } from './mapToken.js'
 
 /**
  * Options for building an AWS Location Service map style URL.
@@ -176,10 +177,16 @@ export function buildMapStyleUrl(
  * `event.error.status` is 403, and `event.error.body` is a `Blob` holding the
  * same `{ message, code }` JSON.
  *
+ * A REFUSED TOKEN. Given `{ getToken, refreshToken }` in place of a bare
+ * `getToken`, a 401 asks `refreshToken` once and sends again when it brings a
+ * different token, within the same `signal` and `overallTimeoutMs` (#72). A
+ * 403 is never retried: a new token cannot change it.
+ *
  * @param apiUrl - Base URL of the Location Service API
  * @param mapStyle - Map style name: 'Standard' or 'Monochrome', or 'Satellite'
  *   or 'Hybrid', which need the `satellite` plan feature (see `MAP_STYLES`)
- * @param getToken - Callback returning the current auth token
+ * @param tokens - Callback returning the current auth token, or
+ *   `{ getToken, refreshToken }` to recover from a refused one
  * @param options - Style options; `language` is applied to the descriptor, all
  *   others become URL params. Those tagged `@planFeature` need that feature of
  *   the application's plan
@@ -193,22 +200,13 @@ export function buildMapStyleUrl(
 export async function fetchMapStyle(
   apiUrl: string,
   mapStyle: MapStyle,
-  getToken: () => string | undefined,
+  tokens: MapTokenSource,
   options: MapStyleOptions & { language?: string } = {},
   request: RequestOptions = {},
 ): Promise<StyleSpecification> {
   const { language, ...styleOptions } = options
   const url = buildMapStyleUrl(apiUrl, mapStyle, styleOptions)
-
-  const token = getToken()
-  // `Bearer undefined` used to go out here, and came back as a 401 the caller
-  // had to work backwards from — a whole round trip for a request that was
-  // never going to succeed (#37).
-  if (!token) {
-    throw noTokenAvailable(
-      'getToken() returned nothing, so no style request was sent. Check the token provider has finished initialising.',
-    )
-  }
+  const call = startCall(request)
 
   // Through the shared transport, not a bare fetch: this gets the same
   // per-attempt timeout, overall budget, cancellation and retry as every other
@@ -223,15 +221,25 @@ export async function fetchMapStyle(
   // This used to throw `Failed to fetch map style: 400`, discarding all of it
   // two lines before anyone could read it — the same defect #89 fixed in the
   // API, one layer up.
-  const style = await requestJson<StyleSpecification>(
-    url,
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: 'application/json',
-      },
-    },
-    request,
+  //
+  // `Bearer undefined` used to go out here, and came back as a 401 the caller
+  // had to work backwards from — a whole round trip for a request that was
+  // never going to succeed (#37). `sendWithTokenRefresh` refuses first.
+  const style = await sendWithTokenRefresh(
+    tokens,
+    'getToken() returned nothing, so no style request was sent. Check the token provider has finished initialising.',
+    call,
+    (token) =>
+      requestJson<StyleSpecification>(
+        url,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: 'application/json',
+          },
+        },
+        call,
+      ),
   )
 
   if (language) {

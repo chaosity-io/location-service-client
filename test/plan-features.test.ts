@@ -99,6 +99,10 @@ const NOT_REQUEST_OPTIONS: Record<string, string> = {
   GeoPlacesCommand:
     "the shape of a sendable command; its input is the command's own, classified under the Places commands below",
   MapLike: 'the slice of a MapLibre map applyMapLanguage touches; client-side',
+  MapTokens:
+    'where a map helper gets its token; the token is a header, not an option',
+  TokenRefreshMap:
+    'the slice of a MapLibre map refreshTokenOnUnauthorized touches; client-side',
   AppConfigClaims: 'read from the token for display; sends nothing',
   VerifyAddressResponse: "the service's answer to a verify; sends nothing",
 }

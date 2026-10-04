@@ -1,6 +1,6 @@
 import debug from 'debug'
 import { createHash } from 'node:crypto'
-import type { TokenResponse } from '../auth/TokenProvider.js'
+import type { GetTokenOptions, TokenResponse } from '../auth/TokenProvider.js'
 import { TokenProvider } from '../auth/TokenProvider.js'
 import { LocationServiceException } from '../errors/LocationServiceException.js'
 import type { ClientConfig } from '../types/index.js'
@@ -119,10 +119,10 @@ export function resolveApiUrl(explicit?: string): string | undefined {
  *
  * Two answers qualify. `/auth/token`'s own `Invalid credentials` is a secret
  * that matched nothing. The gateway's 401 (`UnauthorizedException`) is the
- * authorizer refusing the Basic pair before `/auth/token` runs, and it gives
- * the same answer for a wrong secret and for an application that is not
- * active, so the advice for it names both. `Application is not active`, and
- * every 403, is left as the API wrote it.
+ * authorizer refusing the Basic pair before `/auth/token` runs. An application
+ * that is not active is a 403 (`ApplicationNotActiveException`) on either
+ * path, whose sentence names its cause, and it is left as the API wrote it,
+ * like every 403.
  */
 function isCredentialsRefusal(
   error: unknown,
@@ -138,14 +138,8 @@ function isCredentialsRefusal(
 /** The API's words as a sentence, so the advice can follow them. */
 const sentence = (text: string) => (/[.!?]$/.test(text) ? text : `${text}.`)
 
-function credentialsAdvice(
-  clientId: string,
-  error: LocationServiceException,
-): string {
-  const check = `Check that LOCATION_CLIENT_ID ("${clientId}") and LOCATION_CLIENT_SECRET match your application in the developer portal`
-  return error.code === 'UnauthorizedException'
-    ? `${check}, and that the application is active there.`
-    : `${check}.`
+function credentialsAdvice(clientId: string): string {
+  return `Check that LOCATION_CLIENT_ID ("${clientId}") and LOCATION_CLIENT_SECRET match your application in the developer portal.`
 }
 
 /**
@@ -164,8 +158,15 @@ function credentialsAdvice(
  */
 export interface ServerTokenSource {
   apiUrl: string
-  /** Resolves with a token or rejects; it never resolves tokenless. */
-  getToken(forceRefresh?: boolean): Promise<TokenResponse & { token: string }>
+  /**
+   * Resolves with a token or rejects; it never resolves tokenless. The options
+   * are `TokenProvider.getToken`'s: the connector asks for `cachedUntilExpiry`
+   * (#63), and `getClientConfig` never does.
+   */
+  getToken(
+    forceRefresh?: boolean,
+    options?: GetTokenOptions,
+  ): Promise<TokenResponse & { token: string }>
 }
 
 export function serverTokenSource(
@@ -216,11 +217,12 @@ export function serverTokenSource(
     apiUrl,
     async getToken(
       forceRefresh = false,
+      options?: GetTokenOptions,
     ): Promise<TokenResponse & { token: string }> {
       log('[serverTokenSource] Fetching token (forceRefresh=%s)', forceRefresh)
       let result
       try {
-        result = await provider.getToken(forceRefresh)
+        result = await provider.getToken(forceRefresh, options)
       } catch (error) {
         // The API's code and sentence, passed through (#38). Every 401 and 403
         // used to become "Verify LOCATION_CLIENT_ID and LOCATION_CLIENT_SECRET",
@@ -229,7 +231,7 @@ export function serverTokenSource(
         if (isCredentialsRefusal(error)) {
           throw new LocationServiceException({
             code: error.code,
-            message: `${sentence(error.message)} ${credentialsAdvice(clientId, error)}`,
+            message: `${sentence(error.message)} ${credentialsAdvice(clientId)}`,
             statusCode: error.statusCode,
             requestId: error.requestId,
             details: error.details,

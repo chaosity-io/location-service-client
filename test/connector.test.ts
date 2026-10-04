@@ -704,7 +704,14 @@ describe('a 401 is retried exactly once, with a fresh token (#36)', () => {
       getToken,
     }).send(new SearchTextCommand({ QueryText: 'x' }))
 
-    expect(getToken).toHaveBeenNthCalledWith(2, true)
+    // Asked for cachedUntilExpiry both times, as the environment source asks
+    // its provider (#63); a source that ignores it is unaffected.
+    expect(getToken).toHaveBeenNthCalledWith(1, undefined, {
+      cachedUntilExpiry: true,
+    })
+    expect(getToken).toHaveBeenNthCalledWith(2, true, {
+      cachedUntilExpiry: true,
+    })
     expect(dataCalls()[1]![1].headers.Authorization).toBe(`Bearer ${fresh}`)
   })
 
@@ -764,11 +771,11 @@ describe('a 401 is retried exactly once, with a fresh token (#36)', () => {
 
 describe('a refused token is not re-requested, or re-sent, on every call (#38)', () => {
   const unauthorized = () => apiError(401, { message: 'Unauthorized' })
-  const notActive = () =>
+  const invalidCredentials = () =>
     apiError(401, {
       error: 'invalid_client',
       code: 'InvalidCredentialsException',
-      error_description: 'Application is not active',
+      error_description: 'Invalid credentials',
     })
 
   let TOKEN_REFUSAL_HOLD_MS: number
@@ -779,22 +786,22 @@ describe('a refused token is not re-requested, or re-sent, on every call (#38)',
   afterEach(() => vi.useRealTimers())
 
   it('makes one token request per hold, not one per call, while the data route and /auth/token both answer 401', async () => {
-    // A suspended application: its token is refused on every data route and
-    // its credentials on /auth/token. Each send used to force a new token
+    // A rotated secret: its token is refused on every data route and its
+    // credentials on /auth/token. Each send used to force a new token
     // request, so a busy server asked /auth/token as often as it served a
     // request, and every answer was the same refusal.
     withEnvCredentials()
     const { LocationServiceConnector } = await load()
     fetchMock.mockImplementation(async (url: string) => {
       if (!String(url).endsWith('/auth/token')) return unauthorized()
-      return issued.length ? notActive() : mintedToken()
+      return issued.length ? invalidCredentials() : mintedToken()
     })
     const c = new LocationServiceConnector({ origin: 'https://app.example' })
 
     for (let i = 0; i < 5; i++) {
       await expect(
         c.send(new SearchTextCommand({ QueryText: 'x' })),
-      ).rejects.toThrow('Application is not active')
+      ).rejects.toThrow('Invalid credentials')
     }
     // The first mint, and the one refused re-mint.
     expect(tokenCalls()).toHaveLength(2)
@@ -803,7 +810,7 @@ describe('a refused token is not re-requested, or re-sent, on every call (#38)',
     vi.advanceTimersByTime(TOKEN_REFUSAL_HOLD_MS)
     await expect(
       c.send(new SearchTextCommand({ QueryText: 'x' })),
-    ).rejects.toThrow('Application is not active')
+    ).rejects.toThrow('Invalid credentials')
     expect(tokenCalls()).toHaveLength(3)
   })
 
@@ -837,7 +844,7 @@ describe('a refused token is not re-requested, or re-sent, on every call (#38)',
     const { LocationServiceConnector, LocationServiceException } = await load()
     const refusal = new LocationServiceException({
       code: 'InvalidCredentialsException',
-      message: 'Application is not active',
+      message: 'Invalid credentials',
       statusCode: 401,
     })
     fetchMock.mockImplementation(async (_url: string, init: RequestInit) =>
@@ -856,10 +863,10 @@ describe('a refused token is not re-requested, or re-sent, on every call (#38)',
 
     await expect(
       c.send(new SearchTextCommand({ QueryText: 'x' })),
-    ).rejects.toThrow('Application is not active')
+    ).rejects.toThrow('Invalid credentials')
     await expect(
       c.send(new SearchTextCommand({ QueryText: 'x' })),
-    ).rejects.toThrow('Application is not active')
+    ).rejects.toThrow('Invalid credentials')
     expect(dataCalls()).toHaveLength(1)
 
     current = second

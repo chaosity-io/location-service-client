@@ -200,11 +200,13 @@ describe('what it says when authentication fails', () => {
       code: 'InvalidCredentialsException',
       error_description: 'Invalid credentials',
     })
+  const NOT_ACTIVE =
+    'The application is suspended or disabled: check its status in the portal. A reactivated application is accepted again within 5 minutes.'
   const notActive = () =>
-    tokenErr(401, {
-      error: 'invalid_client',
-      code: 'InvalidCredentialsException',
-      error_description: 'Application is not active',
+    tokenErr(403, {
+      error: 'unauthorized_client',
+      code: 'ApplicationNotActiveException',
+      error_description: NOT_ACTIVE,
     })
   /** The gateway's own 401: the authorizer refused the Basic pair. */
   const gatewayUnauthorized = () =>
@@ -226,22 +228,22 @@ describe('what it says when authentication fails', () => {
     expect(err.message).toMatch(/LOCATION_CLIENT_SECRET/)
   })
 
-  it('reports a suspended application as "Application is not active", not as a credentials problem (#38)', async () => {
+  it("reports a suspended application in the API's sentence, not as a credentials problem (#38)", async () => {
     // The advice used to be added to EVERY 401 and 403, so a suspended
     // application was told to check a secret that was fine.
     fetchMock.mockImplementation(async () => notActive())
     const { getClientConfig } = await load()
 
     const err = await getClientConfig(cfg).catch((e) => e)
-    expect(err.message).toBe('Application is not active')
+    expect(err.message).toBe(NOT_ACTIVE)
     expect(err.message).not.toMatch(/LOCATION_CLIENT_SECRET/)
-    expect(err.code).toBe('InvalidCredentialsException')
-    expect(err.statusCode).toBe(401)
+    expect(err.code).toBe('ApplicationNotActiveException')
+    expect(err.statusCode).toBe(403)
   })
 
-  it('passes the gateway 401 through with its own code, and the advice names both of its causes', async () => {
-    // The authorizer answers a wrong secret and an inactive application with
-    // the same 401, so the advice cannot pick one.
+  it('passes the gateway 401 through with its own code, and the advice names the credentials alone', async () => {
+    // The authorizer answers an inactive application with a 403 of its own,
+    // so its 401 is the credentials, and the advice says nothing of status.
     fetchMock.mockImplementation(async () => gatewayUnauthorized())
     const { getClientConfig } = await load()
 
@@ -249,7 +251,7 @@ describe('what it says when authentication fails', () => {
     expect(err.code).toBe('UnauthorizedException')
     expect(err.message).toMatch(/^Missing, malformed, expired or revoked/)
     expect(err.message).toMatch(/LOCATION_CLIENT_SECRET/)
-    expect(err.message).toMatch(/active/)
+    expect(err.message).not.toMatch(/active/)
   })
 
   it("passes a 403 through unchanged: the API's message already names the cause", async () => {

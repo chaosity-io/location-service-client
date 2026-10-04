@@ -56,7 +56,8 @@ Each takes the client secret, so none of them is exported from the root.
 
 - `fetchMapStyle`, `buildMapStyleUrl`, `createTransformRequest`,
   `fetchStaticMap`, `applyMapLanguage` and the POI toggles, for this service's
-  map routes
+  map routes, and `refreshTokenOnUnauthorized`, which reloads the tiles the API
+  refused once `refreshToken` has given `getToken` a new token
 
 ## What's Custom vs AWS SDK
 

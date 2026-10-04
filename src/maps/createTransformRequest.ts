@@ -24,7 +24,7 @@ import type { RequestTransformFunction } from 'maplibre-gl'
  * reach that is a relative `apiUrl` in a runtime with no `location` to resolve
  * it against — i.e. not a browser, which is the only place MapLibre runs.
  */
-function isOurApi(url: string, apiUrl: string): boolean {
+export function isOurApi(url: string, apiUrl: string): boolean {
   const base = typeof location === 'undefined' ? undefined : location.href
 
   let ours: URL

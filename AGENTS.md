@@ -318,7 +318,8 @@ fix the doc.
   token into an `Authorization` header, and every one of them checks first:
   `GeoPlacesClient` (which asks `refreshToken` before refusing, since the 401
   self-heal cannot cover a request that was never accepted),
-  `LocationServiceConnector`, `fetchMapStyle`, `fetchStaticMap`, and
+  `LocationServiceConnector`, `fetchMapStyle` and `fetchStaticMap` (both
+  through `sendWithTokenRefresh` in `maps/mapToken.ts`), and
   `createTransformRequest` — which warns and omits the header rather than
   throwing, because MapLibre calls it synchronously and cannot handle a throw.
   The shared factory is `noTokenAvailable` in `transport/errors.ts`; only the
@@ -330,18 +331,25 @@ fix the doc.
   0% hit rate (#39). It is now `Map<configKey, TokenProvider>` capped at
   `MAX_CACHED_PROVIDERS`, re-inserted on a hit so insertion order IS the recency
   order. The key still hashes the client secret (#5) — do not simplify it.
-- **A 401 is retried once; a 403 never is.** Both send paths refresh and retry
-  on 401 only, and only when the replacement is genuinely a different token —
-  the API's 403s (Origin not allowed, no domain configured) cannot be fixed by a
-  new token, and re-sending a doomed request sends it twice. `isTokenRejected`
-  in `transport/errors.ts` is the single place that decides.
+- **A 401 is retried once; a 403 never is.** Both send paths, and the two map
+  fetches when handed a `refreshToken` (#72), refresh and retry on 401 only,
+  and only when the replacement is genuinely a different token — the API's
+  403s (Origin not allowed, no domain configured, an application not active)
+  cannot be fixed by a new token, and re-sending a doomed request sends it
+  twice. `isTokenRejected` in `transport/errors.ts` is the single place that
+  decides, and `sendRetryingOnce` in `auth/tokenHold.ts` is the one copy of the
+  retry: a new caller calls it rather than copying it.
 - **A refusal is remembered, not asked again (#38).** A suspended application
   is refused on every data route AND on `/auth/token`, and nothing used to
   remember either: every send paid a refused data request and a refused token
   request, all against the application's own token-route throttle. So every
   place that asks again holds a `TokenHold` (`auth/tokenHold.ts`):
-  `TokenProvider.getToken`, the 401 retry in each send path, and
-  `GeoPlacesClient`'s pre-flight `refreshToken` when it holds no token. A
+  `TokenProvider.getToken`, the 401 retry in each send path,
+  `GeoPlacesClient`'s pre-flight `refreshToken` when it holds no token, and the
+  map helpers' `refreshToken` (#72), one hold per `MapTokens` object, so
+  every helper handed the same object shares it. The API refuses a suspended
+  application 403 on every route, so a send path neither retries nor holds that
+  data request; the hold spares it the token requests. A
   refusal (401 or 403) is re-thrown from memory for `TOKEN_REFUSAL_HOLD_MS`,
   and a `Retry-After` for as long as it asks (#63). A failure that carries
   neither — a network fault, a 500, or a Server Action's error, which reaches

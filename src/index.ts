@@ -86,6 +86,12 @@ export {
 export type { PoiCategory } from './maps/mapPoi.js'
 export { buildMapStyleUrl, fetchMapStyle } from './maps/mapStyle.js'
 export type { MapStyleOptions } from './maps/mapStyle.js'
+export { refreshTokenOnUnauthorized } from './maps/mapToken.js'
+export type {
+  MapTokenSource,
+  MapTokens,
+  TokenRefreshMap,
+} from './maps/mapToken.js'
 export {
   buildStaticMapUrl,
   fetchStaticMap,
