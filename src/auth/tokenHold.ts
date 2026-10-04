@@ -1,4 +1,5 @@
 import { LocationServiceException } from '../errors/LocationServiceException.js'
+import { isTokenRejected } from '../transport/errors.js'
 
 /**
  * How long a refusal is remembered: a token the API refused, or a token
@@ -10,11 +11,11 @@ import { LocationServiceException } from '../errors/LocationServiceException.js'
  * served paid for a doomed data request and a doomed token request, all
  * against the application's own token-route throttle.
  *
- * Thirty seconds bounds how long an application that has just been made
- * active again waits for this side to notice: long enough to turn a request
- * rate into a trickle, short enough to be a pause rather than an outage. It is
- * also about how long a newly created application is refused while it goes
- * live, which is the one refusal that clears itself.
+ * Thirty seconds is short beside the API's own waits: it accepts a
+ * reactivated application again within five minutes, and refuses a newly
+ * created or reactivated one for up to about thirty seconds while its key goes
+ * live. So this side adds at most thirty seconds to either, and turns a
+ * request rate into a trickle meanwhile.
  */
 export const TOKEN_REFUSAL_HOLD_MS = 30_000
 
@@ -123,5 +124,71 @@ export class TokenHold {
 
   forget(): void {
     this.held = undefined
+  }
+}
+
+/**
+ * Send with `token`, and after a 401 once more with `refresh()`'s token when it
+ * is a DIFFERENT one, remembering on `hold` what the API and the source said,
+ * against the token it concerns (#38).
+ *
+ * The one copy of the 401 retry: both send paths and the two map fetches (#72)
+ * call it, so when to ask again is decided here and nowhere else.
+ */
+export async function sendRetryingOnce<T>(
+  hold: TokenHold,
+  token: string,
+  send: (token: string) => Promise<T>,
+  refresh: () => Promise<string | undefined>,
+  onRetry?: () => void,
+): Promise<T> {
+  // This token was refused a moment ago and nothing has replaced it: answer
+  // with that refusal rather than send it, and ask the source again. A
+  // different token ends the hold. When the refresh that followed said nothing
+  // about when to ask again, it is asked now — but the refused token is still
+  // not sent.
+  const held = hold.check(token)
+  if (held && !held.askAgain) throw held.error
+
+  let rejected: unknown = held?.error
+  if (!held) {
+    try {
+      return await send(token)
+    } catch (err) {
+      if (!isTokenRejected(err)) throw err
+      rejected = err
+    }
+  }
+
+  // One retry, and only when the replacement is genuinely a different token.
+  // That single comparison covers every source: a fixed `token` string, a
+  // `getToken` that ignores `forceRefresh`, a `refreshToken` that hands back
+  // what it had, and a cached token the API has revoked before its `exp` —
+  // re-sending any of them is a second doomed request for the same answer.
+  let fresh: string | undefined
+  try {
+    fresh = await refresh()
+  } catch (refusal) {
+    // A rotated secret's token route refuses the refresh as the data route
+    // refused its token. Without this, every send asked again. A refusal that
+    // says nothing — a network fault, or a Server Action's error without its
+    // fields — leaves the source to be asked again, but not the token sent.
+    if (holdFor(refusal) > 0) hold.remember(refusal, token)
+    // Only when no hold stands: one already standing keeps its own end, so
+    // the refused token is tried again once per hold rather than never.
+    else if (!held) hold.remember(rejected, token, { askAgain: true })
+    throw refusal
+  }
+  if (!fresh || fresh === token) {
+    hold.remember(rejected, token)
+    throw rejected
+  }
+
+  onRetry?.()
+  try {
+    return await send(fresh)
+  } catch (again) {
+    if (isTokenRejected(again)) hold.remember(again, fresh)
+    throw again
   }
 }

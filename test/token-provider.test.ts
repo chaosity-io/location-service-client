@@ -187,33 +187,35 @@ describe('concurrent callers share one fetch', () => {
 })
 
 describe('a refusal is remembered, not re-requested on every call (#38)', () => {
+  const NOT_ACTIVE =
+    'The application is suspended or disabled: check its status in the portal. A reactivated application is accepted again within 5 minutes.'
   const notActive = () =>
     tokenResponse(
       {
-        error: 'invalid_client',
-        code: 'InvalidCredentialsException',
-        error_description: 'Application is not active',
+        error: 'unauthorized_client',
+        code: 'ApplicationNotActiveException',
+        error_description: NOT_ACTIVE,
       },
-      401,
+      403,
     )
 
   it('answers from memory for the hold, forced or not, then asks again', async () => {
-    // A suspended application's /auth/token answers 401 every time, and
+    // A suspended application's /auth/token answers 403 every time, and
     // nothing a retry does changes that. Without a memory of it, a busy server
     // asked /auth/token once per request it served, every one refused.
     fetchMock.mockImplementation(async () => notActive())
     const p = new TokenProvider(CONFIG)
 
-    await expect(p.getToken()).rejects.toThrow('Application is not active')
-    await expect(p.getToken()).rejects.toThrow('Application is not active')
+    await expect(p.getToken()).rejects.toThrow(NOT_ACTIVE)
+    await expect(p.getToken()).rejects.toThrow(NOT_ACTIVE)
     await expect(p.getToken(true)).rejects.toMatchObject({
-      message: 'Application is not active',
-      statusCode: 401,
+      message: NOT_ACTIVE,
+      statusCode: 403,
     })
     expect(fetchMock).toHaveBeenCalledTimes(1)
 
     vi.advanceTimersByTime(TOKEN_REFUSAL_HOLD_MS)
-    await expect(p.getToken()).rejects.toThrow('Application is not active')
+    await expect(p.getToken()).rejects.toThrow(NOT_ACTIVE)
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
@@ -227,25 +229,26 @@ describe('a refusal is remembered, not re-requested on every call (#38)', () => 
     const p = new TokenProvider(CONFIG)
 
     await p.getToken()
-    await expect(p.getToken(true)).rejects.toThrow('Application is not active')
-    await expect(p.getToken()).rejects.toThrow('Application is not active')
+    await expect(p.getToken(true)).rejects.toThrow(NOT_ACTIVE)
+    await expect(p.getToken()).rejects.toThrow(NOT_ACTIVE)
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
-  it('remembers a 403 refusal the same way', async () => {
+  it('remembers a 401 refusal the same way', async () => {
     fetchMock.mockImplementation(async () =>
       tokenResponse(
         {
-          code: 'ApplicationNotActiveException',
-          message: 'The application is not active.',
+          error: 'invalid_client',
+          code: 'InvalidCredentialsException',
+          error_description: 'Invalid credentials',
         },
-        403,
+        401,
       ),
     )
     const p = new TokenProvider(CONFIG)
 
-    await expect(p.getToken()).rejects.toMatchObject({ statusCode: 403 })
-    await expect(p.getToken()).rejects.toMatchObject({ statusCode: 403 })
+    await expect(p.getToken()).rejects.toMatchObject({ statusCode: 401 })
+    await expect(p.getToken()).rejects.toMatchObject({ statusCode: 401 })
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 

@@ -221,6 +221,41 @@ const style = await fetchMapStyle(apiUrl, 'Standard', getToken, {
 // then `maxPitch: 85` on the map, so the camera can tilt to see them
 ```
 
+#### When the API refuses the map's token
+
+`getToken` is synchronous, so it can only hand over the token already in hand.
+For when the API refuses that token before its `exp` — after the application's
+secret is rotated, for one — pass `{ getToken, refreshToken }` where the map
+helpers take `getToken`, and add `refreshTokenOnUnauthorized` for the tiles
+MapLibre fetches itself:
+
+```typescript
+import {
+  fetchMapStyle,
+  refreshTokenOnUnauthorized,
+} from '@chaosity/location-client'
+
+// refreshToken obtains a new token, and makes getToken return it from then on.
+const tokens = { getToken, refreshToken }
+
+const style = await fetchMapStyle(apiUrl, 'Standard', tokens)
+// ...the map as above, with createTransformRequest(apiUrl, getToken)...
+const stop = refreshTokenOnUnauthorized(map, apiUrl, tokens)
+```
+
+`fetchMapStyle` and `fetchStaticMap` then answer a 401 by asking `refreshToken`
+once and sending again with the new token, within the same `signal` and
+`overallTimeoutMs`. `refreshTokenOnUnauthorized` listens for the map's `error`
+events: on a 401 from your API it asks `refreshToken` once for the burst, and
+reloads the refused tiles when `getToken` returns a different token. The
+tiles receive the new token no other way — they read `getToken` through
+`createTransformRequest` — so a `refreshToken` that leaves `getToken` unchanged
+reloads nothing. A 403 is never retried: a new token cannot change it. A token
+`refreshToken` could not replace is not asked about again for 30 seconds, by
+any helper handed the same `tokens` object. `stop()` removes the listener.
+
+A bare `getToken` works as it always has: one request, and its 401 to you.
+
 ### The MapLibre worker
 
 MapLibre 6 loads and parses its tiles in a Web Worker, and it finds the
@@ -458,10 +493,13 @@ worth a second round trip. A 403 is never retried: a new token cannot fix an
 **A refused token is not sent again for 30 seconds.** When the API refuses a
 token and `refreshToken` cannot replace it — it rejects with a 401 or 403, or
 returns the same token — the next sends with that token reject with the same
-refusal without a request, and without asking `refreshToken`. A suspended
-application is refused on every route and by its token route alike, so each
-send used to cost a refused request and a refused refresh. A different token
-from `getToken` ends the wait at once. A `refreshToken` that fails with a
+refusal without a request, and without asking `refreshToken`. A rotated secret
+is refused by the data route and, through a `refreshToken` that holds the old
+secret, by the token route too, so each send used to cost a refused request
+and a refused refresh. A suspended application is refused 403
+`ApplicationNotActiveException`, which is never retried, so it is not held
+here: each send has the API's answer. A different token from `getToken` ends
+the wait at once. A `refreshToken` that fails with a
 `Retry-After` is held for that long instead. One that fails with nothing to
 say about when to try again — a network fault, or a Server Action's error,
 which reaches the browser without its fields — is asked again on the next
@@ -477,7 +515,7 @@ Every call in this package takes the same options object — `client.send`,
 await client.send(command, {
   signal, // AbortSignal — cancels mid-flight AND mid-backoff
   timeoutMs: 10_000, // per ATTEMPT
-  overallTimeoutMs: 30_000, // the whole call, waits between attempts included
+  overallTimeoutMs: 30_000, // the whole call: the wait for a token and between attempts
   retry: { maxAttempts: 3 }, // or `false` for none
 })
 ```
@@ -545,9 +583,9 @@ try {
 }
 ```
 
-`message` is the API's own sentence. On `/auth/token` that is its
-`error_description`, so a suspended application's refusal reads
-`Application is not active`.
+`message` is the API's own sentence — on `/auth/token`, its
+`error_description` — so a suspended application's refusal names that cause
+and points to the portal.
 
 #### GeoPlaces Adapter
 
@@ -574,6 +612,13 @@ import { createTransformRequest } from '@chaosity/location-client'
 const transformRequest = createTransformRequest(apiUrl, () => currentToken)
 ```
 
+#### refreshTokenOnUnauthorized
+
+`refreshTokenOnUnauthorized(map, apiUrl, { getToken, refreshToken })` reloads
+the tiles the API refused once `refreshToken` has given `getToken` a new token,
+and returns a function that stops listening. See
+[When the API refuses the map's token](#when-the-api-refuses-the-maps-token).
+
 #### fetchMapStyle
 
 Fetches the map style descriptor with Bearer auth and applies optional language to the descriptor JSON before MapLibre processes it (eliminates the visual flash that occurs when modifying layers post-load).
@@ -589,6 +634,9 @@ const style = await fetchMapStyle(apiUrl, 'Standard', getToken, {
 ```
 
 Hand `style` to `new maplibregl.Map`, with the worker set, as in [MapLibre Map Integration](#maplibre-map-integration).
+Pass `{ getToken, refreshToken }` in place of `getToken` to recover from a
+refused token, as [When the API refuses the map's token](#when-the-api-refuses-the-maps-token)
+shows; `fetchStaticMap` takes the same.
 
 The overlays need the `terrain`, `buildings`, `contours`, `traffic` and `travel-modes` plan features — see [Plan features](#plan-features):
 
@@ -753,11 +801,10 @@ const replacement = await getClientConfig({ forceRefresh: true })
 ```
 
 A refusal arrives with the API's code and sentence. Where the API refused the
-credentials themselves, the message goes on to say which variables to check,
-and names the client ID. An application that is not active reads
-`Application is not active`, although once the API's authorizer has
-refused it the sentence is the same as for a wrong secret, and the advice then
-says to check both. A refusal is remembered for 30 seconds, and a
+credentials themselves, a 401, the message goes on to say which variables to
+check, and names the client ID. An application that is not active is refused
+403 `ApplicationNotActiveException`, in a sentence that names that cause, and
+gets no advice added. A refusal is remembered for 30 seconds, and a
 `Retry-After` for as long as it asks: calls in that time reject at once,
 without asking `/auth/token` again.
 
@@ -817,11 +864,23 @@ which wins over both). `/auth/token` is the one endpoint exempt.
 
 A connector configured this way keeps working indefinitely: it holds a live
 token source, refreshes before expiry, and retries once with a new token if the
-API rejects the one it sent. If the new token is refused too, as a suspended
-application's is, the refusal is remembered for 30 seconds: sends in that time
-reject with it at once, without a data request or a token request. A refresh
-that fails with nothing to say about when to try again, a network fault for
-one, is asked again on the next send, without the refused token first. Pass an
+API rejects the one it sent. When that refresh before expiry fails with anything
+but a refusal — a 429 or 503 from the token route, or a network fault — it keeps
+sending the token it has until 5 seconds before that token's own `exp`, and asks
+the token route nothing more while a `Retry-After` stands; past that it rejects
+with the API's error, `retryAfterMs` intact. A `getToken` you supply is asked
+for this with `{ cachedUntilExpiry: true }`, which `TokenProvider.getToken`
+understands. `getClientConfig` never does it: a token that close to its expiry
+is one a browser provider would ask to replace at once.
+
+After the API rejects a token, if no new token can be had, or the new one is
+refused too — a rotated secret's refresh is refused, for one — the refusal is
+remembered for 30 seconds: sends in that time reject with it at once, without a
+data request or a token request. A suspended application is refused 403 on
+every route, which no new token can change: its data requests are not retried,
+and a token request's refusal is remembered the same way. A refresh that fails
+with nothing to say about when to try again, a network fault for one, is asked
+again on the next send, without the refused token first. Pass an
 explicit `token` instead and you opt out of all of that — it is a fixed string,
 and it dies at its own `exp`:
 
@@ -831,7 +890,7 @@ and it dies at its own `exp`:
 const connector = new LocationServiceConnector({
   apiUrl,
   origin: 'https://your-allowed-domain.example',
-  getToken: (forceRefresh) => provider.getToken(forceRefresh),
+  getToken: (forceRefresh, options) => provider.getToken(forceRefresh, options),
 })
 ```
 

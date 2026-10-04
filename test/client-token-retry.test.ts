@@ -276,20 +276,21 @@ describe('a refused token is not re-sent, nor its refresh re-asked, on every sen
   beforeEach(() => vi.useFakeTimers({ shouldAdvanceTime: true }))
   afterEach(() => vi.useRealTimers())
 
-  const notActive = () =>
+  const refusedCredentials = () =>
     new LocationServiceException({
       code: 'InvalidCredentialsException',
-      message: 'Application is not active',
+      message: 'Invalid credentials',
       statusCode: 401,
     })
 
   it('asks a rejecting refreshToken once per hold, not once per send', async () => {
-    // A suspended application: the data route refuses the token, and the
-    // refresh — under @chaosity/location-client-react, the application's own
-    // token route — is refused too. Each send used to repeat both.
+    // A rotated secret: the data route refuses the token, and the refresh —
+    // under @chaosity/location-client-react, the application's own token
+    // route, still holding the old secret — is refused too. Each send used to
+    // repeat both.
     fetchMock.mockImplementation(async () => unauthorized())
     const refreshToken = vi.fn(async () => {
-      throw notActive()
+      throw refusedCredentials()
     })
     const client = new GeoPlacesClient({
       apiUrl: API,
@@ -300,7 +301,7 @@ describe('a refused token is not re-sent, nor its refresh re-asked, on every sen
     for (let i = 0; i < 5; i++) {
       await expect(
         client.send(new SearchTextCommand({ QueryText: 'x' })),
-      ).rejects.toThrow('Application is not active')
+      ).rejects.toThrow('Invalid credentials')
     }
     expect(refreshToken).toHaveBeenCalledTimes(1)
     expect(fetchMock).toHaveBeenCalledTimes(1)
@@ -308,7 +309,7 @@ describe('a refused token is not re-sent, nor its refresh re-asked, on every sen
     vi.advanceTimersByTime(TOKEN_REFUSAL_HOLD_MS)
     await expect(
       client.send(new SearchTextCommand({ QueryText: 'x' })),
-    ).rejects.toThrow('Application is not active')
+    ).rejects.toThrow('Invalid credentials')
     expect(refreshToken).toHaveBeenCalledTimes(2)
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
@@ -340,13 +341,13 @@ describe('a refused token is not re-sent, nor its refresh re-asked, on every sen
       apiUrl: API,
       getToken: () => current,
       refreshToken: async () => {
-        throw notActive()
+        throw refusedCredentials()
       },
     })
 
     await expect(
       client.send(new SearchTextCommand({ QueryText: 'x' })),
-    ).rejects.toThrow('Application is not active')
+    ).rejects.toThrow('Invalid credentials')
     current = 'fresh'
     await expect(
       client.send(new SearchTextCommand({ QueryText: 'x' })),
@@ -494,7 +495,7 @@ describe('a client with no token holds a refusing refreshToken too (#38)', () =>
     const refreshToken = vi.fn(async (): Promise<string> => {
       throw new LocationServiceException({
         code: 'InvalidCredentialsException',
-        message: 'Application is not active',
+        message: 'Invalid credentials',
         statusCode: 401,
       })
     })
@@ -503,7 +504,7 @@ describe('a client with no token holds a refusing refreshToken too (#38)', () =>
     for (let i = 0; i < 3; i++) {
       await expect(
         client.send(new SearchTextCommand({ QueryText: 'x' })),
-      ).rejects.toThrow('Application is not active')
+      ).rejects.toThrow('Invalid credentials')
     }
     expect(refreshToken).toHaveBeenCalledTimes(1)
     expect(fetchMock).not.toHaveBeenCalled()
@@ -511,7 +512,7 @@ describe('a client with no token holds a refusing refreshToken too (#38)', () =>
     vi.advanceTimersByTime(TOKEN_REFUSAL_HOLD_MS)
     await expect(
       client.send(new SearchTextCommand({ QueryText: 'x' })),
-    ).rejects.toThrow('Application is not active')
+    ).rejects.toThrow('Invalid credentials')
     expect(refreshToken).toHaveBeenCalledTimes(2)
   })
 
@@ -523,7 +524,7 @@ describe('a client with no token holds a refusing refreshToken too (#38)', () =>
       refreshToken: async () => {
         throw new LocationServiceException({
           code: 'InvalidCredentialsException',
-          message: 'Application is not active',
+          message: 'Invalid credentials',
           statusCode: 401,
         })
       },
@@ -531,7 +532,7 @@ describe('a client with no token holds a refusing refreshToken too (#38)', () =>
 
     await expect(
       client.send(new SearchTextCommand({ QueryText: 'x' })),
-    ).rejects.toThrow('Application is not active')
+    ).rejects.toThrow('Invalid credentials')
     source.current = 'arrived'
     await expect(
       client.send(new SearchTextCommand({ QueryText: 'x' })),

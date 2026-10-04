@@ -1,6 +1,5 @@
-import { noTokenAvailable } from '../transport/errors.js'
 import type { RequestOptions } from '../transport/http.js'
-import { requestBlob } from '../transport/http.js'
+import { requestBlob, startCall } from '../transport/http.js'
 import type {
   ColorScheme,
   LabelSize,
@@ -8,6 +7,8 @@ import type {
   ScaleBarUnit,
   StaticMapStyle,
 } from './mapEnums.js'
+import type { MapTokenSource } from './mapToken.js'
+import { sendWithTokenRefresh } from './mapToken.js'
 
 /**
  * Static maps: build the URL, send the right headers, get a Blob.
@@ -184,11 +185,14 @@ export function buildStaticMapUrl(
  *
  * A refused plan feature — a Satellite `style`, the default when none is
  * given, or a `politicalView` — rejects with a `LocationServiceException`
- * whose `isFeatureNotEntitled` is true, as `fetchMapStyle` does.
+ * whose `isFeatureNotEntitled` is true, as `fetchMapStyle` does. Given
+ * `{ getToken, refreshToken }`, a refused token is replaced once, as
+ * `fetchMapStyle` does it (#72).
  *
  * @param apiUrl   Base URL of the Location Service API
  * @param options  Render options; exactly one of center / boundingBox / boundedPositions
- * @param getToken Callback returning the current auth token
+ * @param tokens   Callback returning the current auth token, or
+ *   `{ getToken, refreshToken }` to recover from a refused one
  * @param request  Transport options: `signal` to cancel, `timeoutMs`, `overallTimeoutMs`, `retry`
  *
  * @example
@@ -201,17 +205,10 @@ export function buildStaticMapUrl(
 export async function fetchStaticMap(
   apiUrl: string,
   options: StaticMapOptions,
-  getToken: () => string | undefined,
+  tokens: MapTokenSource,
   request: RequestOptions = {},
 ): Promise<Blob> {
-  const token = getToken()
-  // The same guard as fetchMapStyle and the server connector: a render is not
-  // worth requesting without a token to send (#37).
-  if (!token) {
-    throw noTokenAvailable(
-      'getToken() returned nothing, so no static map was requested. Check the token provider has finished initialising.',
-    )
-  }
+  const call = startCall(request)
 
   // Through the shared transport, so a static map gets the timeout, budget,
   // cancellation and retry every other call has -- and its failures arrive as
@@ -219,14 +216,23 @@ export async function fetchStaticMap(
   // {message, code, requestId} survives, which matters here: the messages are
   // specific and actionable -- "'width' and 'height' are required", "Only one
   // of center, bounding-box or bounded-positions may be set".
-  return requestBlob(
-    buildStaticMapUrl(apiUrl, options),
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: staticMapAccept(options.style),
-      },
-    },
-    request,
+  //
+  // The same guard as fetchMapStyle and the server connector: a render is not
+  // worth requesting without a token to send (#37).
+  return sendWithTokenRefresh(
+    tokens,
+    'getToken() returned nothing, so no static map was requested. Check the token provider has finished initialising.',
+    call,
+    (token) =>
+      requestBlob(
+        buildStaticMapUrl(apiUrl, options),
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: staticMapAccept(options.style),
+          },
+        },
+        call,
+      ),
   )
 }

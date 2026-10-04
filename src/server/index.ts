@@ -1,5 +1,6 @@
 export { TokenProvider } from '../auth/TokenProvider.js'
 export type {
+  GetTokenOptions,
   TokenProviderConfig,
   TokenResponse,
 } from '../auth/TokenProvider.js'

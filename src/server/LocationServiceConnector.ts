@@ -1,12 +1,13 @@
 import debug from 'debug'
-import { TokenHold, holdFor } from '../auth/tokenHold.js'
+import type { GetTokenOptions } from '../auth/TokenProvider.js'
+import { TokenHold, sendRetryingOnce } from '../auth/tokenHold.js'
 import type { VerifyAddressResponse } from '../client/commands.js'
 import { VerifyAddressCommand } from '../client/commands.js'
 import { LocationServiceException } from '../errors/LocationServiceException.js'
 import { resolveEndpoint } from '../transport/endpoints.js'
-import { isTokenRejected, noTokenAvailable } from '../transport/errors.js'
-import type { RequestOptions } from '../transport/http.js'
-import { requestJson } from '../transport/http.js'
+import { noTokenAvailable } from '../transport/errors.js'
+import type { CallOptions, RequestOptions } from '../transport/http.js'
+import { requestJson, startCall, withinCall } from '../transport/http.js'
 import type {
   CommandOutput,
   CommandWithOutput,
@@ -31,11 +32,15 @@ export interface ConnectorConfig {
    * a long-lived connector survive expiry.
    *
    * `forceRefresh` is passed as `true` when the API has just rejected the token
-   * this returned — the signature is `TokenProvider.getToken`'s exactly, so
-   * `getToken: (f) => provider.getToken(f)` is a complete implementation.
+   * this returned, and `options` always asks for `cachedUntilExpiry` (#63): a
+   * source that can keep sending its cached token through a throttled refresh
+   * should, since a connector's token never reaches a browser. The signature
+   * is `TokenProvider.getToken`'s, so
+   * `getToken: (f, o) => provider.getToken(f, o)` is a complete implementation.
    */
   getToken?: (
     forceRefresh?: boolean,
+    options?: GetTokenOptions,
   ) => Promise<string | { token?: string } | undefined>
   /** Falls back to `LOCATION_CLIENT_ID` / `LOCATION_SERVICE_CLIENT_ID`. */
   clientId?: string
@@ -218,7 +223,10 @@ export class LocationServiceConnector {
       return {
         apiUrl: () => requireApiUrl(apiUrl),
         get: async (forceRefresh) => {
-          const result = await getToken(forceRefresh)
+          // As the environment source below asks its provider (#63).
+          const result = await getToken(forceRefresh, {
+            cachedUntilExpiry: true,
+          })
           if (!result) return undefined
           return typeof result === 'string' ? result : result.token
         },
@@ -241,7 +249,10 @@ export class LocationServiceConnector {
       // Already validated by serverTokenSource, which cannot resolve
       // credentials without it.
       apiUrl: () => env.apiUrl,
-      get: async (forceRefresh) => (await env.getToken(forceRefresh)).token,
+      // A throttled refresh keeps the cached token in use until its own exp
+      // (#63): this is a server dispatch, never a token handed to a browser.
+      get: async (forceRefresh) =>
+        (await env.getToken(forceRefresh, { cachedUntilExpiry: true })).token,
     }
   }
 
@@ -300,8 +311,11 @@ export class LocationServiceConnector {
     const cmd = command as GeoPlacesCommand
     const url = `${source.apiUrl()}${resolveEndpoint(cmd)}`
 
+    // The call's deadline starts here, before the token is waited for, so the
+    // caller's `overallTimeoutMs` and `signal` bound the whole call (#62).
+    const call = startCall(options)
     try {
-      return await this.dispatchWithRetry(source, url, cmd, options)
+      return await this.dispatchWithRetry(source, url, cmd, call)
     } catch (err) {
       throw explainMissingOrigin(err, this.effectiveOrigin(options))
     }
@@ -326,60 +340,25 @@ export class LocationServiceConnector {
     source: TokenSource,
     url: string,
     cmd: GeoPlacesCommand,
-    options?: SendOptions,
+    options: SendOptions & CallOptions,
   ): Promise<unknown> {
-    const token = await source.get()
+    // Raced against the caller's signal and deadline, not given them: the
+    // token fetch may be shared with other calls (#62).
+    const token = await withinCall(source.get(), options)
     if (!token) throw noTokenAvailable(NO_TOKEN_ADVICE)
 
-    // This token was refused a moment ago and nothing has replaced it: answer
-    // with that refusal rather than send it, and force the source, again (#38).
-    // A different token from the source ends the hold. When the refresh that
-    // followed said nothing about when to ask again, it is asked now — but the
-    // refused token is still not sent.
-    const held = this.refused.check(token)
-    if (held && !held.askAgain) throw held.error
-
-    let rejected: unknown = held?.error
-    if (!held) {
-      try {
-        return await this.dispatch(url, token, cmd, options)
-      } catch (err) {
-        if (!isTokenRejected(err)) throw err
-        rejected = err
-      }
-    }
-
-    // One retry, and only when the replacement is genuinely a different token.
-    // That single comparison covers every source: a fixed `token` string, a
-    // caller `getToken` that ignores `forceRefresh`, and a cached token the API
-    // has revoked before its `exp` all hand back what we already sent — and
-    // re-sending it would be a second doomed request for the same answer.
-    let fresh: string | undefined
-    try {
-      fresh = await source.get(true)
-    } catch (refusal) {
-      // A suspended application's /auth/token refuses it as its data routes
-      // refuse its token. Without this, every send asked for another. A
-      // refusal that says nothing — a network fault — leaves the source to be
-      // asked again, but not the token sent.
-      if (holdFor(refusal) > 0) this.refused.remember(refusal, token)
-      // Only when no hold stands: one already standing keeps its own end, so
-      // the refused token is tried again once per hold rather than never.
-      else if (!held) this.refused.remember(rejected, token, { askAgain: true })
-      throw refusal
-    }
-    if (!fresh || fresh === token) {
-      this.refused.remember(rejected, token)
-      throw rejected
-    }
-
-    log('401 on a token the API no longer accepts — retrying once, refreshed')
-    try {
-      return await this.dispatch(url, fresh, cmd, options)
-    } catch (again) {
-      if (isTokenRejected(again)) this.refused.remember(again, fresh)
-      throw again
-    }
+    // Through `sendRetryingOnce`, like every 401 retry here (#38). The forced
+    // refresh is raced against the caller as the first ask was (#62).
+    return sendRetryingOnce(
+      this.refused,
+      token,
+      (t) => this.dispatch(url, t, cmd, options),
+      () => withinCall(source.get(true), options),
+      () =>
+        log(
+          '401 on a token the API no longer accepts — retrying once, refreshed',
+        ),
+    )
   }
 
   private dispatch(

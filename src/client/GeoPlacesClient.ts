@@ -1,9 +1,9 @@
 import debug from 'debug'
-import { TokenHold, holdFor } from '../auth/tokenHold.js'
+import { TokenHold, sendRetryingOnce } from '../auth/tokenHold.js'
 import { resolveEndpoint } from '../transport/endpoints.js'
-import { isTokenRejected, noTokenAvailable } from '../transport/errors.js'
-import type { RequestOptions } from '../transport/http.js'
-import { requestJson } from '../transport/http.js'
+import { noTokenAvailable } from '../transport/errors.js'
+import type { CallOptions, RequestOptions } from '../transport/http.js'
+import { requestJson, startCall, withinCall } from '../transport/http.js'
 import type {
   ClientConfig,
   CommandOutput,
@@ -72,12 +72,21 @@ export class GeoPlacesClient {
   }
 
   /**
+   * `refreshToken`, held to the caller's signal and deadline (#62). A slow or
+   * stuck callback used to hold `send` past both.
+   */
+  private askRefreshToken(call: CallOptions): Promise<string | undefined> {
+    const asked = this.clientConfig.refreshToken?.()
+    return asked ? withinCall(asked, call) : Promise.resolve(undefined)
+  }
+
+  /**
    * A token to send, or a refusal — never `undefined`.
    *
    * `refreshToken` is asked only when there is nothing at all in hand, so a
    * client configured the ordinary way pays nothing for this.
    */
-  private async ensureToken(): Promise<string> {
+  private async ensureToken(call: CallOptions): Promise<string> {
     // Truthiness, not `??`: an empty string is a token source with nothing to
     // give, not a decision to send an empty one. With `??` it survived the
     // coalesce, skipped `refreshToken`, and then failed the check below — so
@@ -93,7 +102,7 @@ export class GeoPlacesClient {
     if (held) throw held
     let token: string | undefined
     try {
-      token = await this.clientConfig.refreshToken?.()
+      token = await this.askRefreshToken(call)
     } catch (refusal) {
       this.refused.remember(refusal, NO_TOKEN)
       throw refusal
@@ -140,59 +149,26 @@ export class GeoPlacesClient {
     // source has not produced one yet spent a whole round trip to learn
     // something it already knew. Ask the refresh source instead, and refuse if
     // there is still nothing.
-    const token = await this.ensureToken()
+    // The call's deadline starts here, before any wait for a token (#62).
+    const call = startCall(options)
+    const token = await this.ensureToken(call)
 
-    // This token was refused a moment ago and nothing has replaced it: answer
-    // with that refusal rather than send it, and ask `refreshToken`, again
-    // (#38). A different token from `getToken` ends the hold. When the refresh
-    // that followed said nothing about when to ask again, it is asked now —
-    // but the refused token is still not sent.
-    const held = this.refused.check(token)
-    if (held && !held.askAgain) throw held.error
-
-    let rejected: unknown = held?.error
-    if (!held) {
-      try {
-        return await this.dispatch(url, token, cmd, options)
-      } catch (err) {
-        if (!isTokenRejected(err)) throw err
-        rejected = err
-      }
-    }
-
-    // One shot. `refreshToken` is the only way to actually obtain a new token
-    // here — `getToken` is synchronous and returns the one already in hand —
-    // but it is re-read as a fallback because a provider that refreshes in the
+    // One shot, through `sendRetryingOnce` like every 401 retry here (#38).
+    // `refreshToken` is the only way to actually obtain a new token here —
+    // `getToken` is synchronous and returns the one already in hand — but it
+    // is re-read as a fallback because a provider that refreshes in the
     // background may have landed a new one while this request was in flight.
-    let fresh: string | undefined
-    try {
-      fresh = (await this.clientConfig.refreshToken?.()) ?? this.currentToken()
-    } catch (refusal) {
-      // A suspended application's token route refuses it as its data routes
-      // refuse its token. Without this, every send asked again. A refusal that
-      // says nothing — a network fault, or a Server Action's error without its
-      // fields — leaves the source to be asked again, but not the token sent.
-      if (holdFor(refusal) > 0) this.refused.remember(refusal, token)
-      // Only when no hold stands: one already standing keeps its own end, so
-      // the refused token is tried again once per hold rather than never.
-      else if (!held) this.refused.remember(rejected, token, { askAgain: true })
-      throw refusal
-    }
-
-    // Nothing new to send. Repeating the request would fail identically — a
-    // second round trip for the same 401.
-    if (!fresh || fresh === token) {
-      this.refused.remember(rejected, token)
-      throw rejected
-    }
-
-    log('401 — retrying %s once with a refreshed token', cmd.constructor?.name)
-    try {
-      return await this.dispatch(url, fresh, cmd, options)
-    } catch (again) {
-      if (isTokenRejected(again)) this.refused.remember(again, fresh)
-      throw again
-    }
+    return sendRetryingOnce(
+      this.refused,
+      token,
+      (t) => this.dispatch(url, t, cmd, call),
+      async () => (await this.askRefreshToken(call)) ?? this.currentToken(),
+      () =>
+        log(
+          '401 — retrying %s once with a refreshed token',
+          cmd.constructor?.name,
+        ),
+    )
   }
 
   /**

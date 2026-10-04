@@ -267,25 +267,27 @@ describe('error envelope parsing (legacy tolerance)', () => {
     expect(e.isAuth).toBe(false)
   })
 
-  it('keeps the description of a /auth/token 401 that carries a code (#38)', () => {
+  it('keeps the description of a /auth/token refusal that carries a code (#38)', () => {
     // /auth/token sends its `code` beside the OAuth `error` and
     // `error_description`, and the description is the only field that says
     // why. It used to be read only when the body had no `code`, so every
     // refusal from /auth/token arrived as "Request failed: Unauthorized" — a
     // suspended application indistinguishable from a wrong secret.
+    const notActive =
+      'The application is suspended or disabled: check its status in the portal. A reactivated application is accepted again within 5 minutes.'
     const e = parseErrorResponse(
-      401,
-      'Unauthorized',
+      403,
+      'Forbidden',
       JSON.stringify({
-        error: 'invalid_client',
-        code: 'InvalidCredentialsException',
-        error_description: 'Application is not active',
+        error: 'unauthorized_client',
+        code: 'ApplicationNotActiveException',
+        error_description: notActive,
         requestId: 'r-3',
       }),
     )
-    expect(e.message).toBe('Application is not active')
-    expect(e.code).toBe('InvalidCredentialsException')
-    expect(e.details).toEqual({ oauthError: 'invalid_client' })
+    expect(e.message).toBe(notActive)
+    expect(e.code).toBe('ApplicationNotActiveException')
+    expect(e.details).toEqual({ oauthError: 'unauthorized_client' })
   })
 
   it('still maps the OAuth error to a code for a body that has none', () => {

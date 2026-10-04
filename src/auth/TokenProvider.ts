@@ -16,6 +16,28 @@ export interface TokenResponse {
   error?: string
 }
 
+/**
+ * #63: how close to its own `exp` a cached token may still be sent when a
+ * refresh fails. A margin for the clocks of this host and the API to disagree.
+ */
+const EXPIRY_SKEW_MS = 5_000
+
+export interface GetTokenOptions {
+  /**
+   * When a refresh fails with an error that waiting can fix — a 429 or 503
+   * from `/auth/token`, a network fault, or the `Retry-After` such a failure
+   * left standing — return the cached token instead, while it is before its
+   * own `exp` (#63). A refusal (401 or 403) still clears the cache and throws,
+   * and a forced refresh never falls back: it is asked for because the API
+   * refused the cached token.
+   *
+   * For server-side dispatch only. Never set it where the token is handed to
+   * a browser: a token inside `TOKEN_REFRESH_BUFFER_SECONDS` is one the React
+   * provider asks to replace at once, so `getClientConfig` does not.
+   */
+  cachedUntilExpiry?: boolean
+}
+
 export interface TokenProviderConfig {
   apiUrl: string
   clientId: string
@@ -72,7 +94,10 @@ export class TokenProvider {
     this.config = config
   }
 
-  async getToken(forceRefresh = false): Promise<TokenResponse> {
+  async getToken(
+    forceRefresh = false,
+    options: GetTokenOptions = {},
+  ): Promise<TokenResponse> {
     if (!forceRefresh && this.cachedToken && !this.isExpired()) {
       const expiresIn = this.cachedExpiresAt
         ? Math.floor((this.cachedExpiresAt - Date.now()) / 1000)
@@ -92,13 +117,19 @@ export class TokenProvider {
     const held = this.hold.check()?.error
     if (held) {
       log('Token request held: %s', held.message)
+      const fallback = this.fallback(forceRefresh, options, held)
+      if (fallback) return fallback
       throw held
     }
 
     // If token fetch is already in progress, wait for it
     if (this.tokenPromise) {
       log('Token fetch in progress, waiting for existing request...')
-      return this.tokenPromise
+      return this.tokenPromise.catch((error: unknown) => {
+        const fallback = this.fallback(forceRefresh, options, error)
+        if (fallback) return fallback
+        throw error
+      })
     }
 
     // Start new token fetch
@@ -114,6 +145,10 @@ export class TokenProvider {
     try {
       const result = await this.tokenPromise
       return result
+    } catch (error) {
+      const fallback = this.fallback(forceRefresh, options, error)
+      if (fallback) return fallback
+      throw error
     } finally {
       // Clear promise after completion (success or failure)
       this.tokenPromise = undefined
@@ -191,6 +226,32 @@ export class TokenProvider {
 
     log(
       'Token acquired successfully (expires in %ds)',
+      Math.floor((this.cachedExpiresAt - Date.now()) / 1000),
+    )
+    return {
+      success: true,
+      token: this.cachedToken,
+      expiresAt: this.cachedExpiresAt,
+    }
+  }
+
+  /**
+   * #63: the cached token, when the caller asked for it and the failure is one
+   * that waiting fixes. A refusal has already cleared the cache in fetchToken,
+   * so it can never be the cached token handed back here.
+   */
+  private fallback(
+    forceRefresh: boolean,
+    options: GetTokenOptions,
+    error: unknown,
+  ): TokenResponse | undefined {
+    if (forceRefresh || !options.cachedUntilExpiry) return undefined
+    if (isTokenRefusal(error)) return undefined
+    if (!this.cachedToken || !this.cachedExpiresAt) return undefined
+    if (Date.now() >= this.cachedExpiresAt - EXPIRY_SKEW_MS) return undefined
+    log(
+      'Refresh failed (%s); the cached token is valid for %ds more, sending it',
+      error instanceof Error ? error.message : String(error),
       Math.floor((this.cachedExpiresAt - Date.now()) / 1000),
     )
     return {
