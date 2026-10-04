@@ -355,7 +355,19 @@ fix the doc.
   neither — a network fault, a 500, or a Server Action's error, which reaches
   the browser without its fields — is asked again at once, but a send path
   does not re-send the token the API refused meanwhile (`askAgain`). A send path
-  keys the hold to the token it refused, so a different token ends it.
+  keys the hold to the token it refused, so a different token ends it. A
+  refused RETRY is held too, against the new token, but only where the code
+  KNOWS the retry carried it: a send path holds the 401 on the request it sent
+  with `fresh`, and `refreshTokenOnUnauthorized` a 401 on a tile it reloaded
+  with the token in hand (`reloadedWith`). MapLibre's error event does not say
+  which token a request carried, and a tile sent with the old token can be
+  refused after the new one arrived, so any other tile refused within the hold
+  is reloaded once, and a glyph or sprite asks nothing. The token a refresh
+  brought is noted per `MapTokens` object (`broughtBy`), beside its hold: noted
+  per helper, two maps sharing one object each took the other's token as news.
+  Without the hold, an API that refuses every token (a map pointed at an API
+  its tokens are not for) had the tile helper mint and reload several times a
+  second.
   `holdFor` is the one place that decides how long; another place that asks a
   token source again after a failure must use it, not a copy.
 - **Every `code` is a `LocationServiceErrorCode` (#38).** The API's half is its

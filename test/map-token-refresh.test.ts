@@ -412,6 +412,150 @@ describe('refreshTokenOnUnauthorized: tiles MapLibre fetches itself (#72)', () =
     expect(refreshToken).toHaveBeenCalledTimes(2)
   })
 
+  it('asks no more when the API refuses the token refreshToken brought too, until the hold lapses', async () => {
+    // An API that refuses every token — a map pointed at another API than its
+    // tokens are for — refused each reload in its turn, and each refusal asked
+    // for another token: a mint and a reload several times a second.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      const map = fakeMap()
+      let minted = 0
+      let inHand = 'token-0'
+      const refreshToken = vi.fn(async () => (inHand = `token-${++minted}`))
+      const tokens = { getToken: () => inHand, refreshToken }
+      refreshTokenOnUnauthorized(map, API, tokens)
+
+      map.emit(tileError(401, `${API}/maps/Standard/tiles/1/2/3`))
+      await flush()
+      // The tile reloaded with the new token, refused in its turn.
+      map.emit(tileError(401, `${API}/maps/Standard/tiles/1/2/3`))
+      await flush()
+      map.emit(tileError(401, `${API}/maps/Standard/tiles/1/2/4`))
+      await flush()
+      expect(refreshToken).toHaveBeenCalledTimes(1)
+      expect(map.refreshTiles).toHaveBeenCalledTimes(1)
+
+      // Held as the send paths hold it, and shared with them.
+      fetchMock.mockResolvedValue(refused())
+      const err = await fetchMapStyle(API, 'Standard', tokens).catch((e) => e)
+      expect(err.statusCode).toBe(401)
+      expect(fetchMock).not.toHaveBeenCalled()
+      expect(refreshToken).toHaveBeenCalledTimes(1)
+
+      vi.setSystemTime(Date.now() + 30_001)
+      map.emit(tileError(401, `${API}/maps/Standard/tiles/1/2/6`))
+      await flush()
+      expect(refreshToken).toHaveBeenCalledTimes(2)
+      // Every tile refused meanwhile is reloaded, the one that set the hold too.
+      expect(map.refreshTiles).toHaveBeenLastCalledWith('vector', [
+        { x: 2, y: 3, z: 1 },
+        { x: 2, y: 4, z: 1 },
+        { x: 2, y: 6, z: 1 },
+      ])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('asks once for two maps handed the same tokens, when the API refuses every token', async () => {
+    // Each helper kept its own note of the token a refresh brought, so each
+    // took the other's as news and asked again: as many asks as refusals.
+    const [a, b] = [fakeMap(), fakeMap()]
+    let minted = 0
+    let inHand = 'token-0'
+    const refreshToken = vi.fn(async () => (inHand = `token-${++minted}`))
+    const tokens = { getToken: () => inHand, refreshToken }
+    refreshTokenOnUnauthorized(a, API, tokens)
+    refreshTokenOnUnauthorized(b, API, tokens)
+
+    for (let round = 0; round < 6; round++) {
+      a.emit(tileError(401, `${API}/maps/Standard/tiles/3/1/1`))
+      await flush()
+      b.emit(tileError(401, `${API}/maps/Standard/tiles/3/1/2`))
+      await flush()
+    }
+
+    expect(refreshToken).toHaveBeenCalledTimes(1)
+  })
+
+  it('reloads a tile refused late, with the token before, and holds nothing', async () => {
+    // A tile requested with the old token whose 401 lands after the refresh
+    // settled looks like the new token refused. Holding the new token for it
+    // left that tile empty and refused the style fetch for 30 seconds.
+    const map = fakeMap()
+    let inHand = 'token-0'
+    const refreshToken = vi.fn(async () => (inHand = 'token-1'))
+    const tokens = { getToken: () => inHand, refreshToken }
+    refreshTokenOnUnauthorized(map, API, tokens)
+
+    map.emit(tileError(401, `${API}/maps/Standard/tiles/3/1/1`))
+    await flush()
+    map.emit(tileError(401, `${API}/maps/Standard/tiles/3/1/2`))
+    await flush()
+
+    expect(refreshToken).toHaveBeenCalledTimes(1)
+    expect(map.refreshTiles).toHaveBeenLastCalledWith('vector', [
+      { x: 1, y: 2, z: 3 },
+    ])
+    fetchMock.mockResolvedValueOnce(style())
+    await expect(fetchMapStyle(API, 'Standard', tokens)).resolves.toMatchObject(
+      { version: 8 },
+    )
+    expect(auth(0)).toBe('Bearer token-1')
+  })
+
+  it('asks nothing for a glyph refused while the token the refresh brought is in hand, and holds nothing', async () => {
+    const map = fakeMap()
+    let inHand = 'token-0'
+    const refreshToken = vi.fn(async () => (inHand = 'token-1'))
+    const tokens = { getToken: () => inHand, refreshToken }
+    refreshTokenOnUnauthorized(map, API, tokens)
+
+    map.emit(tileError(401, `${API}/maps/Standard/tiles/3/1/1`))
+    await flush()
+    map.emit({
+      error: Object.assign(new Error('AJAXError: 401'), {
+        status: 401,
+        url: `${API}/maps/glyphs/Amazon%20Ember%20Regular/0-255.pbf`,
+      }),
+    })
+    await flush()
+
+    expect(refreshToken).toHaveBeenCalledTimes(1)
+    fetchMock.mockResolvedValueOnce(style())
+    await expect(fetchMapStyle(API, 'Standard', tokens)).resolves.toMatchObject(
+      { version: 8 },
+    )
+  })
+
+  it('replaces a token refreshToken brought when the API refuses it after the hold', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      const map = fakeMap()
+      let minted = 0
+      let inHand = 'token-0'
+      const refreshToken = vi.fn(async () => (inHand = `token-${++minted}`))
+      refreshTokenOnUnauthorized(map, API, {
+        getToken: () => inHand,
+        refreshToken,
+      })
+
+      map.emit(tileError(401, `${API}/maps/Standard/tiles/1/2/3`))
+      await flush()
+      // The reload was served; a while later the new token is revoked too.
+      vi.setSystemTime(Date.now() + 30_001)
+      map.emit(tileError(401, `${API}/maps/Standard/tiles/1/2/4`))
+      await flush()
+
+      expect(refreshToken).toHaveBeenCalledTimes(2)
+      expect(map.refreshTiles).toHaveBeenLastCalledWith('vector', [
+        { x: 2, y: 4, z: 1 },
+      ])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('keeps a refreshToken that throws out of the map, and asks again on the next 401', async () => {
     const map = fakeMap()
     const refreshToken = vi.fn((): Promise<string> => {
