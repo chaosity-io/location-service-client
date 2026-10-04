@@ -1,4 +1,9 @@
-import { TokenHold, holdFor, sendRetryingOnce } from '../auth/tokenHold.js'
+import {
+  TOKEN_REFUSAL_HOLD_MS,
+  TokenHold,
+  holdFor,
+  sendRetryingOnce,
+} from '../auth/tokenHold.js'
 import { LocationServiceException } from '../errors/LocationServiceException.js'
 import { noTokenAvailable } from '../transport/errors.js'
 import type { CallOptions } from '../transport/http.js'
@@ -36,6 +41,14 @@ function holdOf(tokens: MapTokens): TokenHold {
   if (!hold) holds.set(tokens, (hold = new TokenHold()))
   return hold
 }
+
+/**
+ * The token each `MapTokens` object's refresh last brought, and until when a
+ * 401 while it is in hand is not news (#72). One per object, beside its hold:
+ * a note per helper had each of two helpers handed one object take the
+ * other's token as news, and ask again for every refusal.
+ */
+const broughtBy = new WeakMap<MapTokens, { token: string; until: number }>()
 
 /**
  * Send with the token in hand, and after a 401 once more with a different one
@@ -103,8 +116,11 @@ export interface TokenRefreshMap {
  *
  * What it learns is held as the fetch helpers hold it, and shared with them
  * when they are handed the same `tokens` object (#38): a token `refreshToken`
- * could not replace, and a failure that says when to ask again, are not asked
- * about again until they lapse or the token in hand changes.
+ * could not replace, a token it brought that the API refused on a tile
+ * reloaded with it, and a failure that says when to ask again, are not asked
+ * about again until they lapse or the token in hand changes. While the token
+ * a refresh brought is in hand, any other refused tile is reloaded once with
+ * it, without asking.
  *
  * Returns a function that stops listening.
  *
@@ -124,23 +140,69 @@ export function refreshTokenOnUnauthorized(
 ): () => void {
   const hold = holdOf(tokens)
   // Each source's refused tiles, keyed `z/x/y` so a tile refused twice is
-  // reloaded once.
+  // reloaded once. Tiles refused while a hold stands are kept, so the next ask
+  // reloads them; MapLibre ignores ids no longer in view.
   const refused = new Map<string, Map<string, TileCoordinates>>()
+  // The token each tile was reloaded with here, keyed `source:z/x/y`.
+  const reloadedWith = new Map<string, string>()
   let asking = false
+
+  const reload = (
+    sourceId: string,
+    tiles: TileCoordinates[],
+    token: string,
+  ) => {
+    for (const { x, y, z } of tiles)
+      reloadedWith.set(`${sourceId}:${z}/${x}/${y}`, token)
+    map.refreshTiles(sourceId, tiles)
+  }
 
   const onError = ({ error, sourceId, tile }: MapErrorEvent) => {
     if (error?.status !== 401 || !error.url || !isOurApi(error.url, apiUrl))
       return
+    let refusedTile: [string, TileCoordinates] | undefined
     if (sourceId && tile) {
       const { x, y, z } = tile.tileID.canonical
       const tiles = refused.get(sourceId) ?? new Map()
       refused.set(sourceId, tiles.set(`${z}/${x}/${y}`, { x, y, z }))
+      refusedTile = [sourceId, { x, y, z }]
     }
     if (asking) return
 
     const inHand = tokens.getToken()
     const held = hold.check(inHand)
     if (held && !held.askAgain) return
+
+    // A 401 while the token a refresh brought is in hand. The event does not
+    // say which token the refused request carried, and a tile requested with
+    // the token before, answered late, looks like the new token refused. So
+    // only a tile reloaded here with the token in hand is that token refused:
+    // the API refuses every token, as it does a map pointed at an API its
+    // tokens are not for, and asking again minted a token and reloaded the
+    // tiles several times a second. That is remembered, as a send path
+    // remembers its retry refused, and the next ask is after the hold. Any
+    // other tile is reloaded once with the token in hand; anything else (a
+    // glyph, a sprite) asks nothing.
+    const brought = broughtBy.get(tokens)
+    if (inHand && inHand === brought?.token && Date.now() < brought.until) {
+      if (!refusedTile) return
+      const [id, coordinates] = refusedTile
+      const key = `${coordinates.z}/${coordinates.x}/${coordinates.y}`
+      if (reloadedWith.get(`${id}:${key}`) !== inHand) {
+        refused.get(id)?.delete(key)
+        reload(id, [coordinates], inHand)
+        return
+      }
+      // Kept in `refused`, as every tile refused during the hold is.
+      broughtBy.delete(tokens)
+      hold.remember(
+        unauthorized(
+          'The API refused a tile reloaded with the token refreshToken brought.',
+        ),
+        inHand,
+      )
+      return
+    }
 
     asking = true
     // Asked inside an executor, so a `refreshToken` that throws instead of
@@ -156,18 +218,21 @@ export function refreshTokenOnUnauthorized(
           // MapLibre's error carries none of the API's fields, so the refusal
           // is remembered as the 401 it was.
           hold.remember(
-            new LocationServiceException({
-              code: 'UnauthorizedException',
-              message:
-                'The API refused the token, and getToken has no other since refreshToken settled.',
-              statusCode: 401,
-            }),
+            unauthorized(
+              'The API refused the token, and getToken has no other since refreshToken settled.',
+            ),
             inHand,
           )
           return
         }
+        broughtBy.set(tokens, {
+          token: now,
+          until: Date.now() + TOKEN_REFUSAL_HOLD_MS,
+        })
+        // What was reloaded with an earlier token can no longer match.
+        reloadedWith.clear()
         for (const [id, tiles] of refused)
-          map.refreshTiles(id, [...tiles.values()])
+          if (tiles.size) reload(id, [...tiles.values()], now)
       })
       .catch((refusal: unknown) => {
         // Only a failure that says when to ask again is remembered; any other
@@ -183,3 +248,11 @@ export function refreshTokenOnUnauthorized(
   map.on('error', onError)
   return () => map.off('error', onError)
 }
+
+/** A refusal MapLibre reported, remembered as the 401 it was. */
+const unauthorized = (message: string) =>
+  new LocationServiceException({
+    code: 'UnauthorizedException',
+    message,
+    statusCode: 401,
+  })

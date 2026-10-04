@@ -252,7 +252,14 @@ tiles receive the new token no other way — they read `getToken` through
 `createTransformRequest` — so a `refreshToken` that leaves `getToken` unchanged
 reloads nothing. A 403 is never retried: a new token cannot change it. A token
 `refreshToken` could not replace is not asked about again for 30 seconds, by
-any helper handed the same `tokens` object. `stop()` removes the listener.
+any helper handed the same `tokens` object. For 30 seconds after a refresh
+brought a new token, a refused tile is reloaded once with it rather than asked
+about: a tile requested with the old token can be refused after the new one
+arrived. A tile the helper reloaded with the new token, refused again, means
+the API refuses that token too, and it is held like the first. So an API that
+refuses every token, such as a map pointed at an API its tokens are not for,
+costs one new token per 30 seconds rather than one per reload, however many
+maps share the `tokens` object. `stop()` removes the listener.
 
 A bare `getToken` works as it always has: one request, and its 401 to you.
 
