@@ -808,6 +808,28 @@ gets no advice added. A refusal is remembered for 30 seconds, and a
 `Retry-After` for as long as it asks: calls in that time reject at once,
 without asking `/auth/token` again.
 
+When the token goes to a browser, the browser is what sees it refused, and
+only it can say so. `@chaosity/location-client-react`'s provider asks its
+`getConfig` again with `{ refusedToken }` after a 401. Answer it by replacing
+the cached token only when it is the one refused:
+
+```typescript
+'use server'
+import { getClientConfig } from '@chaosity/location-client/server'
+
+export async function getLocationConfig(request?: { refusedToken?: string }) {
+  const config = await getClientConfig()
+  return request?.refusedToken === config.token
+    ? getClientConfig({ forceRefresh: true })
+    : config
+}
+```
+
+Asked again without it, `getClientConfig()` hands back the token it caches:
+the one just refused. The check mints once per refused token, and nothing for a
+report of any other. It does not stop a caller echoing the token it was just
+given to make the server mint again; rate-limit the endpoint if that matters.
+
 The return value is **plain data** — no methods, no closures — so it can be
 returned straight out of a Next.js Server Action to a Client Component. It is
 therefore a snapshot: the token in it stops working at its `expiresAt`, and the
